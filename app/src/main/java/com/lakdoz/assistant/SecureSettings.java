@@ -29,6 +29,15 @@ public class SecureSettings {
     public void setSmartEnsemble(boolean enabled) { prefs.edit().putBoolean("smart_ensemble", enabled).apply(); }
     public boolean isSmartEnsemble() { return prefs.getBoolean("smart_ensemble", true); }
 
+    public void setResponseMode(String mode) { prefs.edit().putString("response_mode", mode == null ? "Dengeli" : mode).apply(); }
+    public String getResponseMode() {
+        String mode = prefs.getString("response_mode", "Dengeli");
+        return mode == null || mode.trim().isEmpty() ? "Dengeli" : mode.trim();
+    }
+
+    public void setMemoryEnabled(boolean enabled) { prefs.edit().putBoolean("memory_enabled", enabled).apply(); }
+    public boolean isMemoryEnabled() { return prefs.getBoolean("memory_enabled", true); }
+
     public void setGeminiModel(String model) { prefs.edit().putString("gemini_model", model == null ? "" : model.trim()).apply(); }
     public String getGeminiModel() {
         String model = prefs.getString("gemini_model", "");
@@ -98,3 +107,4 @@ public class SecureSettings {
         return kg.generateKey();
     }
 }
+

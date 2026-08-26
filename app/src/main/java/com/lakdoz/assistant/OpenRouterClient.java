@@ -9,7 +9,13 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 public class OpenRouterClient {
     private final SecureSettings settings;
@@ -17,25 +23,81 @@ public class OpenRouterClient {
 
     public boolean isConfigured(){ String k=settings.getOpenRouterApiKey(); return k!=null&&!k.trim().isEmpty(); }
 
-    public String ask(String prompt,List<HistoryStore.Turn> history,String memory)throws Exception{
+    public String ask(String prompt,List<HistoryStore.Turn> history,String memory)throws Exception {
+        List<String> answers=askFreeCandidates(prompt,history,memory);
+        if (answers.isEmpty()) throw new IllegalStateException("Ücretsiz AI modellerinden cevap alınamadı.");
+        return answers.get(0);
+    }
+
+    /** Ücretsiz modelleri mümkün olduğunca dinamik keşfeder ve birkaçını paralel sorgular. */
+    public List<String> askFreeCandidates(String prompt,List<HistoryStore.Turn> history,String memory)throws Exception {
         String key=settings.getOpenRouterApiKey();
         if(key==null||key.trim().isEmpty())throw new IllegalStateException("OpenRouter bağlantısı ayarlı değil.");
+        List<String> models=discoverFreeModels(key);
+        if(models.isEmpty())models.add("openrouter/free");
+        ExecutorService pool=Executors.newFixedThreadPool(Math.min(3,models.size()));
+        ArrayList<Future<String>> jobs=new ArrayList<>();
+        for(String model:models){
+            jobs.add(pool.submit(new Callable<String>(){public String call()throws Exception{
+                return askWithModel(key,model,prompt,history,memory);
+            }}));
+        }
+        ArrayList<String> answers=new ArrayList<>();
+        for(Future<String> job:jobs){
+            try{
+                String answer=job.get(18,TimeUnit.SECONDS);
+                if(answer!=null&&!answer.trim().isEmpty())answers.add(answer.trim());
+            }catch(Exception ignored){}
+        }
+        pool.shutdownNow();
+        return answers;
+    }
+
+    private List<String> discoverFreeModels(String key)throws Exception {
+        HttpURLConnection c=(HttpURLConnection)new URL("https://openrouter.ai/api/v1/models").openConnection();
+        c.setRequestMethod("GET");c.setConnectTimeout(7000);c.setReadTimeout(12000);
+        c.setRequestProperty("Authorization","Bearer "+key.trim());
+        int code=c.getResponseCode();
+        if(code<200||code>=300)throw new IllegalStateException("OpenRouter modelleri HTTP "+code);
+        JSONObject root=new JSONObject(readAll(c.getInputStream()));
+        JSONArray data=root.optJSONArray("data");
+        ArrayList<String> out=new ArrayList<>();
+        if(data==null)return out;
+        for(int i=0;i<data.length()&&out.size()<3;i++){
+            JSONObject model=data.optJSONObject(i);if(model==null)continue;
+            String id=model.optString("id","");
+            JSONObject pricing=model.optJSONObject("pricing");
+            String promptPrice=pricing==null?"":pricing.optString("prompt","");
+            String completionPrice=pricing==null?"":pricing.optString("completion","");
+            if(id.isEmpty()||id.equals("openrouter/free"))continue;
+            if(!isZeroPrice(promptPrice)||!isZeroPrice(completionPrice))continue;
+            out.add(id);
+        }
+        return out;
+    }
+
+    private boolean isZeroPrice(String price){
+        if(price==null)return false;
+        String p=price.trim();
+        return p.equals("0")||p.equals("0.0")||p.equals("0.000000")||p.equals("0e0")||p.equals("0E0");
+    }
+
+    private String askWithModel(String key,String model,String prompt,List<HistoryStore.Turn> history,String memory)throws Exception {
         JSONObject body=new JSONObject();
-        body.put("model","openrouter/free");
+        body.put("model",model);
         JSONArray messages=new JSONArray();
-        StringBuilder sys=new StringBuilder("Sen Lakdoz AI için ikinci görüş üreten güçlü bir yardımcı modelsin. Türkçe cevap ver. Soruyu dikkatle çöz, yazım hatalarını bağlamdan düzelt, güncel olmayan bilgiyi kesinmiş gibi söyleme. Kısa ama gerekçeli ol.");
+        StringBuilder sys=new StringBuilder("Sen Lakdoz AI için bağımsız bir yardımcı modelsin. Türkçe cevap ver. Kullanıcının yazım hatalarını, eksik harflerini ve konuşma dili ifadelerini bağlamdan düzelt. Sorunun niyetini değiştirme; emin olmadığın bilgiyi uydurma. Kısa ama gerekçeli bir cevap üret.");
         if(memory!=null&&!memory.trim().isEmpty())sys.append("\n\nİlgili eski sohbet hafızası:\n").append(memory.trim());
         messages.put(new JSONObject().put("role","system").put("content",sys.toString()));
-        int start=Math.max(0,history==null?0:history.size()-6);
+        int start=Math.max(0,history==null?0:history.size()-8);
         if(history!=null)for(int i=start;i<history.size();i++){
             HistoryStore.Turn t=history.get(i);
             messages.put(new JSONObject().put("role","assistant".equals(t.role)?"assistant":"user").put("content",t.text));
         }
         messages.put(new JSONObject().put("role","user").put("content",prompt));
         body.put("messages",messages);
-        body.put("temperature",0.35);
+        body.put("temperature",0.25);
         body.put("max_tokens",900);
-
         HttpURLConnection c=(HttpURLConnection)new URL("https://openrouter.ai/api/v1/chat/completions").openConnection();
         c.setRequestMethod("POST");c.setDoOutput(true);c.setConnectTimeout(7000);c.setReadTimeout(22000);
         c.setRequestProperty("Authorization","Bearer "+key.trim());
@@ -44,13 +106,13 @@ public class OpenRouterClient {
         byte[] bytes=body.toString().getBytes(StandardCharsets.UTF_8);
         c.setFixedLengthStreamingMode(bytes.length);c.getOutputStream().write(bytes);c.getOutputStream().close();
         int code=c.getResponseCode();
-        if(code<200||code>=300)throw new IllegalStateException("İkinci AI servisi HTTP "+code+": "+readAll(c.getErrorStream()));
+        if(code<200||code>=300)throw new IllegalStateException("Ücretsiz AI servisi HTTP "+code);
         JSONObject root=new JSONObject(readAll(c.getInputStream()));
         JSONArray choices=root.optJSONArray("choices");
-        if(choices==null||choices.length()==0)throw new IllegalStateException("İkinci AI boş cevap verdi.");
+        if(choices==null||choices.length()==0)throw new IllegalStateException("Ücretsiz AI boş cevap verdi.");
         JSONObject msg=choices.getJSONObject(0).optJSONObject("message");
         String out=msg==null?"":msg.optString("content","");
-        if(out.trim().isEmpty())throw new IllegalStateException("İkinci AI boş cevap verdi.");
+        if(out.trim().isEmpty())throw new IllegalStateException("Ücretsiz AI boş cevap verdi.");
         return out.trim();
     }
 

@@ -13,16 +13,45 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 
 public class SecureSettings {
-    private static final String ALIAS = "lakdoz_ai_key_v1";
+    private static final String ALIAS = "lakdoz_gemini_key_v2";
     private final SharedPreferences prefs;
 
     public SecureSettings(Context context) {
         prefs = context.getSharedPreferences("lakdoz_secure", Context.MODE_PRIVATE);
     }
 
-    public void setApiKey(String value) throws Exception {
+    public void setGeminiApiKey(String value) throws Exception {
+        saveEncrypted("gemini_key", value);
+    }
+
+    public String getGeminiApiKey() {
+        return loadEncrypted("gemini_key");
+    }
+
+    public void clearGeminiApiKey() {
+        prefs.edit().remove("gemini_key_ct").remove("gemini_key_iv").apply();
+    }
+
+    public void setGeminiModel(String model) {
+        prefs.edit().putString("gemini_model", model == null ? "" : model.trim()).apply();
+    }
+
+    public String getGeminiModel() {
+        String model = prefs.getString("gemini_model", "gemini-3.7-flash");
+        return model == null || model.trim().isEmpty() ? "gemini-3.7-flash" : model.trim();
+    }
+
+    public void setBackendUrl(String url) {
+        prefs.edit().putString("backend", url == null ? "" : url.trim()).apply();
+    }
+
+    public String getBackendUrl() {
+        return prefs.getString("backend", "");
+    }
+
+    private void saveEncrypted(String prefix, String value) throws Exception {
         if (value == null || value.trim().isEmpty()) {
-            prefs.edit().remove("api_key_ct").remove("api_key_iv").apply();
+            prefs.edit().remove(prefix + "_ct").remove(prefix + "_iv").apply();
             return;
         }
         SecretKey key = getOrCreateKey();
@@ -30,35 +59,29 @@ public class SecureSettings {
         cipher.init(Cipher.ENCRYPT_MODE, key);
         byte[] ct = cipher.doFinal(value.trim().getBytes(StandardCharsets.UTF_8));
         prefs.edit()
-                .putString("api_key_ct", Base64.encodeToString(ct, Base64.NO_WRAP))
-                .putString("api_key_iv", Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP))
+                .putString(prefix + "_ct", Base64.encodeToString(ct, Base64.NO_WRAP))
+                .putString(prefix + "_iv", Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP))
                 .apply();
     }
 
-    public String getApiKey() {
+    private String loadEncrypted(String prefix) {
         try {
-            String ctS = prefs.getString("api_key_ct", "");
-            String ivS = prefs.getString("api_key_iv", "");
-            if (ctS.isEmpty() || ivS.isEmpty()) return "";
+            String ctS = prefs.getString(prefix + "_ct", "");
+            String ivS = prefs.getString(prefix + "_iv", "");
+            if (ctS == null || ivS == null || ctS.isEmpty() || ivS.isEmpty()) return "";
             KeyStore ks = KeyStore.getInstance("AndroidKeyStore");
             ks.load(null);
             SecretKey key = (SecretKey) ks.getKey(ALIAS, null);
             if (key == null) return "";
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(128, Base64.decode(ivS, Base64.NO_WRAP)));
+            cipher.init(Cipher.DECRYPT_MODE, key,
+                    new GCMParameterSpec(128, Base64.decode(ivS, Base64.NO_WRAP)));
             byte[] pt = cipher.doFinal(Base64.decode(ctS, Base64.NO_WRAP));
             return new String(pt, StandardCharsets.UTF_8);
         } catch (Exception e) {
             return "";
         }
     }
-
-    public void setModel(String model) { prefs.edit().putString("model", model).apply(); }
-    public String getModel() { return prefs.getString("model", "gpt-5.6-luna"); }
-    public void setWebEnabled(boolean enabled) { prefs.edit().putBoolean("web", enabled).apply(); }
-    public boolean isWebEnabled() { return prefs.getBoolean("web", true); }
-    public void setBackendUrl(String url) { prefs.edit().putString("backend", url == null ? "" : url.trim()).apply(); }
-    public String getBackendUrl() { return prefs.getString("backend", ""); }
 
     private SecretKey getOrCreateKey() throws Exception {
         KeyStore ks = KeyStore.getInstance("AndroidKeyStore");

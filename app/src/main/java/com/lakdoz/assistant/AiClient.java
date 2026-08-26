@@ -13,51 +13,52 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 public class AiClient {
+    private static final String MODEL = "gemini-2.5-flash";
     private final SecureSettings settings;
-    public AiClient(Context context) { settings = new SecureSettings(context); }
+
+    public AiClient(Context context) {
+        settings = new SecureSettings(context);
+    }
 
     public String ask(String prompt, List<HistoryStore.Turn> history) throws Exception {
-        String backend = settings.getBackendUrl();
-        if (backend != null && !backend.isEmpty()) return askBackend(backend, prompt, history);
         String key = settings.getGeminiApiKey();
-        if (key == null || key.isEmpty()) {
-            throw new IllegalStateException("Gemini bağlantısı ayarlı değil. AI AYARLARI bölümünden Gemini API anahtarını ekle.");
+        if (key == null || key.trim().isEmpty()) {
+            throw new IllegalStateException("Gemini API anahtarı ayarlı değil. AI AYARLARI bölümünden anahtarını ekle.");
         }
-        return askGemini(key, prompt, history);
+        return askGemini(key.trim(), prompt, history);
     }
 
     public String testConnection() throws Exception {
         String key = settings.getGeminiApiKey();
-        if (key == null || key.isEmpty()) throw new IllegalStateException("Önce Gemini API anahtarını kaydet.");
-        return askGemini(key, "Sadece 'Bağlantı başarılı' yaz.", java.util.Collections.emptyList());
+        if (key == null || key.trim().isEmpty()) {
+            throw new IllegalStateException("Önce Gemini API anahtarını kaydet.");
+        }
+        return askGemini(key.trim(), "Türkçe olarak sadece 'Bağlantı başarılı' yaz.", java.util.Collections.emptyList());
     }
 
     private String askGemini(String key, String prompt, List<HistoryStore.Turn> history) throws Exception {
-        String model = settings.getGeminiModel();
-        String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" +
-                URLEncoder.encode(model, "UTF-8") + "/generateContent?key=" + URLEncoder.encode(key, "UTF-8");
+        String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL +
+                ":generateContent?key=" + URLEncoder.encode(key, "UTF-8");
 
         JSONObject body = new JSONObject();
-        JSONArray contents = new JSONArray();
 
-        JSONObject system = new JSONObject();
-        system.put("role", "user");
+        JSONObject systemInstruction = new JSONObject();
         JSONArray systemParts = new JSONArray();
         systemParts.put(new JSONObject().put("text",
-                "Sen Lakdoz adlı Türkçe kişisel yapay zekâ asistansın. Doğal, yararlı ve kısa cevap ver. " +
-                "Varsayılan dil Türkçe. Kullanıcı bilgi soruyorsa cevabı doğrudan ver; uygulama açtırma. " +
-                "Kesin olmadığın şeyleri kesinmiş gibi söyleme. Telefon komutları uygulamanın yerel araçlarıyla çözülür."));
-        system.put("parts", systemParts);
-        contents.put(system);
+                "Sen Lakdoz adlı Türkçe kişisel yapay zekâ asistansın. Kullanıcıyla doğal ve samimi konuş. " +
+                "Varsayılan dil Türkçe. Bilgi sorularında doğrudan cevap ver. Gereksiz yere web sayfası veya uygulama açtırma. " +
+                "Kesin olmadığın bilgiyi kesinmiş gibi söyleme. Kısa sorularda kısa, ayrıntı istenirse ayrıntılı cevap ver. " +
+                "Telefon komutları uygulamanın yerel Android araçları tarafından ayrıca işlenir."));
+        systemInstruction.put("parts", systemParts);
+        body.put("systemInstruction", systemInstruction);
 
+        JSONArray contents = new JSONArray();
         int start = Math.max(0, history.size() - 12);
         for (int i = start; i < history.size(); i++) {
             HistoryStore.Turn t = history.get(i);
             JSONObject c = new JSONObject();
             c.put("role", "assistant".equals(t.role) ? "model" : "user");
-            JSONArray parts = new JSONArray();
-            parts.put(new JSONObject().put("text", t.text));
-            c.put("parts", parts);
+            c.put("parts", new JSONArray().put(new JSONObject().put("text", t.text)));
             contents.put(c);
         }
 
@@ -68,63 +69,49 @@ public class AiClient {
         body.put("contents", contents);
 
         JSONObject generation = new JSONObject();
-        generation.put("temperature", 0.6);
-        generation.put("maxOutputTokens", 1024);
+        generation.put("temperature", 0.65);
+        generation.put("maxOutputTokens", 1200);
         body.put("generationConfig", generation);
 
         HttpURLConnection c = open(endpoint);
         writeJson(c, body);
         JSONObject json = new JSONObject(readResponse(c));
+
         JSONArray candidates = json.optJSONArray("candidates");
         if (candidates != null && candidates.length() > 0) {
-            JSONObject content = candidates.optJSONObject(0).optJSONObject("content");
-            if (content != null) {
-                JSONArray parts = content.optJSONArray("parts");
-                if (parts != null) {
-                    StringBuilder sb = new StringBuilder();
-                    for (int i = 0; i < parts.length(); i++) {
-                        JSONObject part = parts.optJSONObject(i);
-                        if (part != null) {
+            JSONObject first = candidates.optJSONObject(0);
+            if (first != null) {
+                JSONObject content = first.optJSONObject("content");
+                if (content != null) {
+                    JSONArray parts = content.optJSONArray("parts");
+                    if (parts != null) {
+                        StringBuilder sb = new StringBuilder();
+                        for (int i = 0; i < parts.length(); i++) {
+                            JSONObject part = parts.optJSONObject(i);
+                            if (part == null) continue;
                             String text = part.optString("text", "");
                             if (!text.isEmpty()) {
                                 if (sb.length() > 0) sb.append("\n");
                                 sb.append(text);
                             }
                         }
+                        if (sb.length() > 0) return sb.toString();
                     }
-                    if (sb.length() > 0) return sb.toString();
                 }
+                String finish = first.optString("finishReason", "");
+                if (!finish.isEmpty()) throw new IllegalStateException("Gemini yanıtı tamamlayamadı: " + finish);
             }
         }
-        JSONObject feedback = json.optJSONObject("promptFeedback");
-        if (feedback != null) {
-            throw new IllegalStateException("Gemini isteği engellendi: " + feedback.toString());
-        }
-        throw new IllegalStateException("Gemini cevap döndürmedi.");
-    }
 
-    private String askBackend(String base, String prompt, List<HistoryStore.Turn> history) throws Exception {
-        JSONObject body = new JSONObject();
-        body.put("message", prompt);
-        JSONArray h = new JSONArray();
-        int start = Math.max(0, history.size() - 12);
-        for (int i = start; i < history.size(); i++) {
-            HistoryStore.Turn t = history.get(i);
-            h.put(new JSONObject().put("role", t.role).put("text", t.text));
-        }
-        body.put("history", h);
-        HttpURLConnection c = open(base.replaceAll("/+$", "") + "/chat");
-        writeJson(c, body);
-        JSONObject json = new JSONObject(readResponse(c));
-        String answer = json.optString("answer", "");
-        if (answer.isEmpty()) throw new IllegalStateException("Sunucu cevap döndürmedi.");
-        return answer;
+        JSONObject feedback = json.optJSONObject("promptFeedback");
+        if (feedback != null) throw new IllegalStateException("Gemini isteği engellendi: " + feedback.toString());
+        throw new IllegalStateException("Gemini boş cevap döndürdü.");
     }
 
     private HttpURLConnection open(String url) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setRequestMethod("POST");
-        c.setConnectTimeout(12000);
+        c.setConnectTimeout(15000);
         c.setReadTimeout(90000);
         c.setDoOutput(true);
         c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -141,12 +128,14 @@ public class AiClient {
     private String readResponse(HttpURLConnection c) throws Exception {
         int code = c.getResponseCode();
         InputStream is = code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream();
-        if (is == null) throw new IllegalStateException("AI servisi cevap vermedi: " + code);
+        if (is == null) throw new IllegalStateException("Gemini cevap vermedi: HTTP " + code);
+
         BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
         StringBuilder sb = new StringBuilder();
         String line;
         while ((line = br.readLine()) != null) sb.append(line);
         br.close();
+
         if (code < 200 || code >= 300) {
             String msg = sb.toString();
             try {
@@ -154,7 +143,17 @@ public class AiClient {
                 JSONObject error = root.optJSONObject("error");
                 if (error != null) msg = error.optString("message", msg);
             } catch (Exception ignored) {}
-            throw new IllegalStateException("Gemini servisi " + code + ": " + msg);
+
+            if (code == 400 || code == 403) {
+                throw new IllegalStateException("Gemini anahtarı geçersiz veya bu API için yetkili değil. Yeni bir Google AI Studio anahtarı oluştur. (HTTP " + code + ")");
+            }
+            if (code == 404) {
+                throw new IllegalStateException("Gemini modeli bulunamadı. Lakdoz gemini-2.5-flash kullanıyor. (HTTP 404)");
+            }
+            if (code == 429) {
+                throw new IllegalStateException("Gemini ücretsiz kullanım kotasına ulaşıldı. Bir süre sonra tekrar dene. (HTTP 429)");
+            }
+            throw new IllegalStateException("Gemini servisi HTTP " + code + ": " + msg);
         }
         return sb.toString();
     }

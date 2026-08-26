@@ -134,16 +134,22 @@ public class LocalCommandRouter {
 
     private boolean isWeatherRequest(String raw, List<HistoryStore.Turn> history) {
         String f = fold(raw);
-        if (f.contains("hava") || f.contains("weather") || f.contains("sicaklik") || f.contains("kac derece") || f.contains("yagmur") || f.contains("ruzgar")) return true;
-        boolean temporal = f.matches(".*\\b(\\d+\\s*saat\\s*sonra|bir\\s*saat\\s*sonra|sonra|aksam|gece|sabah|yarin|birazdan)\\b.*");
-        if (history != null && raw != null && raw.trim().length() <= 80) {
-            for (int i = history.size() - 1, seen = 0; i >= 0 && seen < 8; i--, seen++) {
-                HistoryStore.Turn t = history.get(i);
-                String x = fold(t.text);
-                if ("assistant".equals(t.role) && (x.contains("icin su an") || x.contains("yagis olasiligi") || x.contains("ruzgar"))) return true;
-                if (temporal && (x.contains("hava") || x.contains("sicaklik") || x.contains("derece"))) return true;
-            }
-        }
+
+        // Meta talk, complaints, summaries and topic changes must never trigger a weather lookup.
+        if (f.contains("ozet") || f.contains("niye") || f.contains("neden") || f.contains("tuttur") ||
+                f.contains("sacma") || f.contains("yanlis") || f.contains("konu") || f.contains("gec") ||
+                f.contains("anlat") || f.contains("demek istedim") || f.contains("soruyorum diye")) return false;
+
+        boolean directWeather = f.contains("hava durumu") || f.contains("hava nasil") || f.contains("weather") ||
+                f.contains("sicaklik") || f.contains("kac derece") || f.contains("yagmur var") ||
+                f.contains("yagacak") || f.contains("ruzgar") || f.contains("nem");
+
+        boolean weatherFollowUp = f.matches(".*\\b(\\d+\\s*(saat|saate|saatte)|bir\\s*saat|iki\\s*saat|uc\\s*saat|sonra|aksam|gece|sabah|yarin|birazdan)\\b.*") &&
+                (f.contains("nasil") || f.contains("olacak") || f.contains("yagmur") || f.contains("derece") || f.contains("hava"));
+
+        if (directWeather || weatherFollowUp) return true;
+
+        // Very short replies are NOT assumed to be weather merely because weather appeared earlier.
         return false;
     }
 

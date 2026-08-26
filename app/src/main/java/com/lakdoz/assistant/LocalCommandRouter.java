@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.provider.AlarmClock;
+import android.content.SharedPreferences;
 import java.text.Normalizer;
 import java.util.Locale;
 import java.util.regex.Matcher;
@@ -32,7 +33,11 @@ public class LocalCommandRouter {
     }
 
     private final Context context;
-    public LocalCommandRouter(Context context) { this.context = context; }
+    private final SharedPreferences contextPrefs;
+    public LocalCommandRouter(Context context) {
+        this.context = context;
+        this.contextPrefs = context.getSharedPreferences("lakdoz_context", Context.MODE_PRIVATE);
+    }
 
     public Result tryHandle(String raw) { return tryHandle(raw, null); }
 
@@ -47,7 +52,10 @@ public class LocalCommandRouter {
             }
         }
 
-        if (c.contains("youtube")) {
+        Result liveInfo = tryLiveKnowledge(raw);
+        if (liveInfo.handled) return liveInfo;
+
+        if (containsLike(c, "youtube", 2)) {
             String q = raw.replaceAll("(?i)youtube(?:'dan|'da|'de|dan|den)?", "")
                     .replaceAll("(?i)uygulamasını|uygulamasini|aç|ac|ara|aramaya gir|şarkısını|sarkisini", " ")
                     .replaceAll("\\s+", " ").trim();
@@ -110,7 +118,7 @@ public class LocalCommandRouter {
                 {"spotify", "com.spotify.music"}
         };
         for (String[] app : apps) {
-            if (c.contains(app[0]) && (c.contains("ac") || c.contains("baslat"))) {
+            if (containsLike(c, app[0], 2) && (c.contains("ac") || c.contains("baslat"))) {
                 Intent launch = context.getPackageManager().getLaunchIntentForPackage(app[1]);
                 if (launch != null) {
                     launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -149,6 +157,8 @@ public class LocalCommandRouter {
 
         String remembered = lastWeatherPlace(history);
         if (!remembered.isEmpty()) return remembered;
+        String persisted = contextPrefs.getString("last_weather_place", "");
+        if (persisted != null && !persisted.trim().isEmpty()) return persisted.trim();
 
         if (history != null) {
             for (int i = history.size() - 1; i >= 0; i--) {
@@ -202,6 +212,13 @@ public class LocalCommandRouter {
             try { return Math.max(1, Math.min(48, Integer.parseInt(m.group(1)))); } catch (Exception ignored) {}
         }
         if (f.contains("bir saat sonra")) return 1;
+        if (f.contains("iki saat sonra")) return 2;
+        if (f.contains("uc saat sonra")) return 3;
+        if (f.contains("yarin")) return 24;
+        if (f.contains("gece")) return 4;
+        if (f.contains("aksam")) return 2;
+        if (f.contains("sabah")) return 10;
+        if (f.contains("birazdan")) return 1;
         return 0;
     }
 
@@ -214,6 +231,7 @@ public class LocalCommandRouter {
         String admin = g.optString("admin1", "");
         String country = g.optString("country", "");
         String label = name + (admin.isEmpty() ? "" : ", " + admin) + (country.isEmpty() ? "" : ", " + country);
+        contextPrefs.edit().putString("last_weather_place", name).putString("last_weather_label", label).apply();
 
         String forecast = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon +
                 "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m" +
@@ -358,6 +376,55 @@ public class LocalCommandRouter {
         if (rain >= 0) out.append(" Yağış olasılığı %").append(rain).append(".");
         if (!Double.isNaN(wind)) out.append(" Rüzgar ").append(Math.round(wind)).append(" km/sa.");
         return out.toString();
+    }
+
+
+    private Result tryLiveKnowledge(String raw) {
+        String f = fold(raw);
+        try {
+            if (f.matches(".*\\b(euro|dolar|usd|eur|sterlin|gbp)\\b.*") && (f.contains("kac") || f.contains("kur") || f.contains("cevir") || f.contains("eder"))) {
+                Matcher amount = Pattern.compile("(\\d+(?:[\\.,]\\d+)?)").matcher(f);
+                double value = 1.0;
+                if (amount.find()) try { value = Double.parseDouble(amount.group(1).replace(',', '.')); } catch (Exception ignored) {}
+                String from = f.contains("usd") || f.contains("dolar") ? "USD" : f.contains("gbp") || f.contains("sterlin") ? "GBP" : "EUR";
+                String to = from.equals("EUR") ? (f.contains("dolar") || f.contains("usd") ? "USD" : "TRY") : (f.contains("euro") || f.contains("eur") ? "EUR" : "TRY");
+                JSONObject fx = getJson("https://api.frankfurter.app/latest?amount=" + value + "&from=" + from + "&to=" + to);
+                JSONObject rates = fx.optJSONObject("rates");
+                if (rates != null && rates.has(to)) return Result.yes(String.format(Locale.forLanguageTag("tr-TR"), "%.2f %s yaklaşık %.2f %s.", value, from, rates.optDouble(to), to));
+            }
+
+            boolean wikiCue = f.contains("kimdir") || f.contains("nedir") || f.contains("neresi") || f.contains("hakkinda") || f.contains("wiki") || f.contains("internetten bak");
+            if (wikiCue) {
+                String q = raw.replaceAll("(?iu)\\b(kimdir|nedir|neresi|hakkında|hakkinda|wiki(?:pedia)?|internetten|bak|ara|öğren|ogren)\\b", " ").replaceAll("[?!.]+", " ").replaceAll("\\s+", " ").trim();
+                if (q.length() >= 2) {
+                    String searchUrl = "https://tr.wikipedia.org/w/api.php?action=query&list=search&srsearch=" + URLEncoder.encode(q, "UTF-8") + "&utf8=1&format=json&srlimit=1";
+                    JSONObject root = getJson(searchUrl);
+                    JSONObject query = root.optJSONObject("query");
+                    JSONArray arr = query == null ? null : query.optJSONArray("search");
+                    if (arr != null && arr.length() > 0) {
+                        String title = arr.getJSONObject(0).optString("title", q);
+                        JSONObject page = getJson("https://tr.wikipedia.org/api/rest_v1/page/summary/" + URLEncoder.encode(title.replace(" ", "_"), "UTF-8"));
+                        String extract = page.optString("extract", "");
+                        if (!extract.isEmpty()) {
+                            if (extract.length() > 700) extract = extract.substring(0, 700).trim() + "…";
+                            return Result.yes(extract);
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return Result.no();
+    }
+
+    private boolean containsLike(String foldedText, String target, int maxDistance) {
+        if (foldedText == null || target == null) return false;
+        String t = fold(target);
+        if (foldedText.contains(t)) return true;
+        for (String token : foldedText.split("[^a-z0-9]+")) {
+            if (token.length() < Math.max(3, t.length() - 3)) continue;
+            if (levenshtein(token, t) <= maxDistance) return true;
+        }
+        return false;
     }
 
     private JSONObject getJson(String url) throws Exception {

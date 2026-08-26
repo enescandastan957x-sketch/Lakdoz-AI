@@ -134,26 +134,22 @@ public class LocalCommandRouter {
 
     private boolean isWeatherRequest(String raw, List<HistoryStore.Turn> history) {
         String f = fold(raw);
-        if (f.contains("hava") || f.contains("weather") || f.contains("sicaklik") || f.contains("kac derece") ||
-                f.contains("yagmur") || f.contains("ruzgar") || f.contains("derece")) return true;
 
-        boolean temporal = f.matches(".*\\b(\\d+\\s*saat\\s*sonra|bir\\s*saat\\s*sonra|sonra|aksam|gece|sabah|yarin|birazdan)\\b.*");
-        boolean weatherFollowUp = temporal || f.contains("orada") || f.contains("ayni yer") ||
-                f.contains("ayni yerde") || f.contains("peki") || f.contains("saatlik") ||
-                f.contains("saatte") || f.contains("saat sonra");
-        boolean shortClarification = f.contains("icin") || f.contains("soruyorum") || f.contains("devam et") ||
-                f.contains("baska ne") || f.equals("peki");
+        // Meta talk, complaints, summaries and topic changes must never trigger a weather lookup.
+        if (f.contains("ozet") || f.contains("niye") || f.contains("neden") || f.contains("tuttur") ||
+                f.contains("sacma") || f.contains("yanlis") || f.contains("konu") || f.contains("gec") ||
+                f.contains("anlat") || f.contains("demek istedim") || f.contains("soruyorum diye")) return false;
 
-        // Önceki hava cevabına yalnızca mevcut mesaj da hava ile ilişkili görünüyorsa dön.
-        // Böylece “Magaluf hakkında bilgi ver, plajları nasılsın?” gibi konu değişimleri
-        // önceki hava yanıtı tarafından yanlışlıkla hava sorgusuna çevrilmez.
-        if (history != null && raw != null && raw.trim().length() <= 90 && (weatherFollowUp || shortClarification)) {
-            for (int i = history.size() - 1, seen = 0; i >= 0 && seen < 8; i--, seen++) {
-                HistoryStore.Turn t = history.get(i);
-                String x = fold(t.text);
-                if ("assistant".equals(t.role) && (x.contains("icin su an") || x.contains("yagis olasiligi") || x.contains("ruzgar"))) return true;
-            }
-        }
+        boolean directWeather = f.contains("hava durumu") || f.contains("hava nasil") || f.contains("weather") ||
+                f.contains("sicaklik") || f.contains("kac derece") || f.contains("yagmur var") ||
+                f.contains("yagacak") || f.contains("ruzgar") || f.contains("nem");
+
+        boolean weatherFollowUp = f.matches(".*\\b(\\d+\\s*(saat|saate|saatte)|bir\\s*saat|iki\\s*saat|uc\\s*saat|sonra|aksam|gece|sabah|yarin|birazdan)\\b.*") &&
+                (f.contains("nasil") || f.contains("olacak") || f.contains("yagmur") || f.contains("derece") || f.contains("hava"));
+
+        if (directWeather || weatherFollowUp) return true;
+
+        // Very short replies are NOT assumed to be weather merely because weather appeared earlier.
         return false;
     }
 
@@ -416,7 +412,7 @@ public class LocalCommandRouter {
                 if (rates != null && rates.has(to)) return Result.yes(String.format(Locale.forLanguageTag("tr-TR"), "%.2f %s yaklaşık %.2f %s.", value, from, rates.optDouble(to), to));
             }
 
-            boolean wikiCue = f.contains("kimdir") || f.contains("nedir") || f.contains("neresi") || f.contains("wikipedia") || f.contains("wiki") || f.contains("internetten bak");
+            boolean wikiCue = f.contains("kimdir") || f.contains("nedir") || f.contains("neresi") || f.contains("hakkinda") || f.contains("wiki") || f.contains("internetten bak");
             if (wikiCue) {
                 String q = raw.replaceAll("(?iu)\\b(kimdir|nedir|neresi|hakkında|hakkinda|wiki(?:pedia)?|internetten|bak|ara|öğren|ogren)\\b", " ").replaceAll("[?!.]+", " ").replaceAll("\\s+", " ").trim();
                 if (q.length() >= 2) {
@@ -438,3 +434,48 @@ public class LocalCommandRouter {
         } catch (Exception ignored) {}
         return Result.no();
     }
+
+    private boolean containsLike(String foldedText, String target, int maxDistance) {
+        if (foldedText == null || target == null) return false;
+        String t = fold(target);
+        if (foldedText.contains(t)) return true;
+        for (String token : foldedText.split("[^a-z0-9]+")) {
+            if (token.length() < Math.max(3, t.length() - 3)) continue;
+            if (levenshtein(token, t) <= maxDistance) return true;
+        }
+        return false;
+    }
+
+    private JSONObject getJson(String url) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setConnectTimeout(7000); c.setReadTimeout(9000); c.setRequestMethod("GET");
+        c.setRequestProperty("User-Agent", "LakdozAI/1.0");
+        int code = c.getResponseCode();
+        if (code < 200 || code >= 300) throw new IllegalStateException("HTTP " + code);
+        BufferedReader br = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder(); String line;
+        while ((line = br.readLine()) != null) sb.append(line);
+        br.close(); c.disconnect();
+        return new JSONObject(sb.toString());
+    }
+
+    private String weatherText(int code) {
+        if (code == 0) return "açık";
+        if (code == 1 || code == 2) return "az bulutlu";
+        if (code == 3) return "kapalı";
+        if (code == 45 || code == 48) return "sisli";
+        if (code >= 51 && code <= 57) return "çisenti";
+        if (code >= 61 && code <= 67) return "yağmurlu";
+        if (code >= 71 && code <= 77) return "karlı";
+        if (code >= 80 && code <= 82) return "sağanak yağışlı";
+        if (code >= 85 && code <= 86) return "kar sağanaklı";
+        if (code >= 95) return "gök gürültülü";
+        return "değişken hava";
+    }
+
+    private static String fold(String s) {
+        String n = Normalizer.normalize(s == null ? "" : s, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "").toLowerCase(Locale.ROOT);
+        return n.replace('ı','i').replace('ş','s').replace('ğ','g').replace('ç','c').replace('ö','o').replace('ü','u');
+    }
+}

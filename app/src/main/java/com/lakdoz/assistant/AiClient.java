@@ -10,10 +10,10 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 public class AiClient {
-    private static final String MODEL = "gemini-2.5-flash";
     private final SecureSettings settings;
 
     public AiClient(Context context) {
@@ -23,29 +23,56 @@ public class AiClient {
     public String ask(String prompt, List<HistoryStore.Turn> history) throws Exception {
         String key = settings.getGeminiApiKey();
         if (key == null || key.trim().isEmpty()) {
-            throw new IllegalStateException("Gemini API anahtarı ayarlı değil. AI AYARLARI bölümünden anahtarını ekle.");
+            throw new IllegalStateException("Gemini bağlantısı ayarlı değil. AI AYARLARI bölümünden anahtarını ekle.");
         }
-        return askGemini(key.trim(), prompt, history);
+        return askWithFallback(key.trim(), prompt, history);
     }
 
     public String testConnection() throws Exception {
         String key = settings.getGeminiApiKey();
         if (key == null || key.trim().isEmpty()) {
-            throw new IllegalStateException("Önce Gemini API anahtarını kaydet.");
+            throw new IllegalStateException("Önce Gemini bağlantısını kaydet.");
         }
-        return askGemini(key.trim(), "Türkçe olarak sadece 'Bağlantı başarılı' yaz.", java.util.Collections.emptyList());
+        return askWithFallback(key.trim(), "Türkçe olarak yalnızca 'Bağlantı başarılı' yaz.", java.util.Collections.emptyList());
     }
 
-    private String askGemini(String key, String prompt, List<HistoryStore.Turn> history) throws Exception {
-        String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL +
+    private String askWithFallback(String key, String prompt, List<HistoryStore.Turn> history) throws Exception {
+        ArrayList<String> models = new ArrayList<>();
+        addModel(models, settings.getGeminiModel());
+        addModel(models, "gemini-flash-latest");
+        addModel(models, "gemini-3.7-flash");
+        addModel(models, "gemini-3.6-flash");
+
+        Exception last = null;
+        for (String model : models) {
+            try {
+                String answer = askGemini(key, model, prompt, history);
+                settings.setGeminiModel(model);
+                return answer;
+            } catch (IllegalStateException e) {
+                last = e;
+                String m = e.getMessage() == null ? "" : e.getMessage();
+                if (!m.contains("HTTP 404")) throw e;
+            }
+        }
+        throw last == null ? new IllegalStateException("Uygun Gemini modeli bulunamadı.") : last;
+    }
+
+    private void addModel(ArrayList<String> list, String model) {
+        if (model == null) return;
+        String m = model.trim();
+        if (!m.isEmpty() && !list.contains(m)) list.add(m);
+    }
+
+    private String askGemini(String key, String model, String prompt, List<HistoryStore.Turn> history) throws Exception {
+        String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + model +
                 ":generateContent?key=" + URLEncoder.encode(key, "UTF-8");
 
         JSONObject body = new JSONObject();
-
         JSONObject systemInstruction = new JSONObject();
         JSONArray systemParts = new JSONArray();
         systemParts.put(new JSONObject().put("text",
-                "Sen Lakdoz adlı Türkçe kişisel yapay zekâ asistansın. Kullanıcıyla doğal ve samimi konuş. " +
+                "Sen Lakdoz adlı Türkçe kişisel yapay zekâ asistansın. Kullanıcıyla doğal, samimi ve yararlı konuş. " +
                 "Varsayılan dil Türkçe. Bilgi sorularında doğrudan cevap ver. Gereksiz yere web sayfası veya uygulama açtırma. " +
                 "Kesin olmadığın bilgiyi kesinmiş gibi söyleme. Kısa sorularda kısa, ayrıntı istenirse ayrıntılı cevap ver. " +
                 "Telefon komutları uygulamanın yerel Android araçları tarafından ayrıca işlenir."));
@@ -61,7 +88,6 @@ public class AiClient {
             c.put("parts", new JSONArray().put(new JSONObject().put("text", t.text)));
             contents.put(c);
         }
-
         JSONObject current = new JSONObject();
         current.put("role", "user");
         current.put("parts", new JSONArray().put(new JSONObject().put("text", prompt)));
@@ -69,13 +95,12 @@ public class AiClient {
         body.put("contents", contents);
 
         JSONObject generation = new JSONObject();
-        generation.put("temperature", 0.65);
-        generation.put("maxOutputTokens", 1200);
+        generation.put("maxOutputTokens", 1400);
         body.put("generationConfig", generation);
 
         HttpURLConnection c = open(endpoint);
         writeJson(c, body);
-        JSONObject json = new JSONObject(readResponse(c));
+        JSONObject json = new JSONObject(readResponse(c, model));
 
         JSONArray candidates = json.optJSONArray("candidates");
         if (candidates != null && candidates.length() > 0) {
@@ -98,13 +123,8 @@ public class AiClient {
                         if (sb.length() > 0) return sb.toString();
                     }
                 }
-                String finish = first.optString("finishReason", "");
-                if (!finish.isEmpty()) throw new IllegalStateException("Gemini yanıtı tamamlayamadı: " + finish);
             }
         }
-
-        JSONObject feedback = json.optJSONObject("promptFeedback");
-        if (feedback != null) throw new IllegalStateException("Gemini isteği engellendi: " + feedback.toString());
         throw new IllegalStateException("Gemini boş cevap döndürdü.");
     }
 
@@ -125,11 +145,10 @@ public class AiClient {
         c.getOutputStream().close();
     }
 
-    private String readResponse(HttpURLConnection c) throws Exception {
+    private String readResponse(HttpURLConnection c, String model) throws Exception {
         int code = c.getResponseCode();
         InputStream is = code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream();
         if (is == null) throw new IllegalStateException("Gemini cevap vermedi: HTTP " + code);
-
         BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
         StringBuilder sb = new StringBuilder();
         String line;
@@ -143,16 +162,12 @@ public class AiClient {
                 JSONObject error = root.optJSONObject("error");
                 if (error != null) msg = error.optString("message", msg);
             } catch (Exception ignored) {}
-
-            if (code == 400 || code == 403) {
-                throw new IllegalStateException("Gemini anahtarı geçersiz veya bu API için yetkili değil. Yeni bir Google AI Studio anahtarı oluştur. (HTTP " + code + ")");
-            }
-            if (code == 404) {
-                throw new IllegalStateException("Gemini modeli bulunamadı. Lakdoz gemini-2.5-flash kullanıyor. (HTTP 404)");
-            }
-            if (code == 429) {
-                throw new IllegalStateException("Gemini ücretsiz kullanım kotasına ulaşıldı. Bir süre sonra tekrar dene. (HTTP 429)");
-            }
+            if (code == 400 || code == 401 || code == 403)
+                throw new IllegalStateException("Gemini bağlantısı reddedildi. Anahtarı kontrol et. (HTTP " + code + ")");
+            if (code == 404)
+                throw new IllegalStateException("Gemini modeli bulunamadı: " + model + " (HTTP 404)");
+            if (code == 429)
+                throw new IllegalStateException("Gemini kullanım kotasına ulaşıldı. Bir süre sonra tekrar dene. (HTTP 429)");
             throw new IllegalStateException("Gemini servisi HTTP " + code + ": " + msg);
         }
         return sb.toString();

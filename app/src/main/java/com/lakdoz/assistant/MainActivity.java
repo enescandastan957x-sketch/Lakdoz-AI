@@ -16,8 +16,9 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowInsets;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -45,121 +46,192 @@ public class MainActivity extends Activity {
         settings = new SecureSettings(this);
         initTts();
         setContentView(buildUi());
+        applyInsets();
         refreshHistory();
         ensureMic();
-        if (settings.getApiKey().isEmpty() && settings.getBackendUrl().isEmpty()) {
-            status.setText("AI bağlantısı henüz ayarlı değil. 'AI AYARLARI'na dokun.");
+        if (settings.getGeminiApiKey().isEmpty() && settings.getBackendUrl().isEmpty()) {
+            status.setText("Gemini bağlantısı ayarlı değil • AI AYARLARI");
         }
     }
 
     private View buildUi() {
-        int p = dp(16);
+        int p = dp(18);
         LinearLayout root = new LinearLayout(this);
+        root.setId(android.R.id.content);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(p, p, p, p);
-        root.setBackgroundColor(Color.rgb(246,246,248));
+        root.setPadding(p, dp(10), p, dp(12));
+        root.setBackgroundColor(Color.rgb(9, 11, 16));
 
         LinearLayout top = new LinearLayout(this);
         top.setGravity(Gravity.CENTER_VERTICAL);
         TextView title = new TextView(this);
         title.setText("Lakdoz AI");
-        title.setTextSize(29);
+        title.setTextSize(30);
+        title.setTextColor(Color.WHITE);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         top.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
         Button settingsBtn = button("AI AYARLARI");
         settingsBtn.setOnClickListener(v -> showSettings());
         top.addView(settingsBtn);
         root.addView(top);
 
         TextView sub = new TextView(this);
-        sub.setText("0.5 • konuş, sor, cevabı Lakdoz söylesin");
+        sub.setText("0.6 • Gemini • Galaxy S25 Ultra uyumlu");
         sub.setTextSize(14);
-        sub.setTextColor(Color.DKGRAY);
+        sub.setTextColor(Color.rgb(156, 163, 175));
+        sub.setPadding(0, dp(2), 0, dp(8));
         root.addView(sub);
 
         status = new TextView(this);
         status.setText("Hazır");
         status.setTextSize(14);
-        status.setPadding(0,p/2,0,p/2);
+        status.setTextColor(Color.rgb(129, 230, 217));
+        status.setPadding(0, 0, 0, dp(8));
         root.addView(status);
 
         scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
         chat = new TextView(this);
-        chat.setTextSize(17);
-        chat.setTextColor(Color.rgb(30,30,35));
-        chat.setLineSpacing(0,1.15f);
-        chat.setPadding(0,p,0,p);
-        scroll.addView(chat);
+        chat.setTextSize(18);
+        chat.setTextColor(Color.rgb(235, 237, 242));
+        chat.setLineSpacing(0, 1.18f);
+        chat.setPadding(dp(4), dp(12), dp(4), dp(16));
+        scroll.addView(chat, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
 
         input = new EditText(this);
         input.setHint("Bana bir şey sor veya komut ver…");
+        input.setHintTextColor(Color.rgb(125, 133, 147));
+        input.setTextColor(Color.WHITE);
+        input.setTextSize(17);
+        input.setBackgroundColor(Color.rgb(20, 24, 33));
+        input.setPadding(dp(14), dp(12), dp(14), dp(12));
         input.setMinLines(2);
         input.setMaxLines(5);
         root.addView(input, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout row = new LinearLayout(this);
+        row.setPadding(0, dp(8), 0, 0);
         Button talk = button("KONUŞ");
         talk.setOnClickListener(v -> listen());
         Button send = button("GÖNDER");
         send.setOnClickListener(v -> submit(input.getText().toString()));
-        Button clear = button("GEÇMİŞİ SİL");
+        Button clear = button("SİL");
         clear.setOnClickListener(v -> { history.clear(); refreshHistory(); });
-        row.addView(talk, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        row.addView(send, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        row.addView(clear, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(talk, new LinearLayout.LayoutParams(0, dp(54), 1));
+        row.addView(send, new LinearLayout.LayoutParams(0, dp(54), 1));
+        row.addView(clear, new LinearLayout.LayoutParams(0, dp(54), 0.72f));
         root.addView(row);
         return root;
     }
 
-    private Button button(String text) { Button b = new Button(this); b.setText(text); return b; }
+    private void applyInsets() {
+        View content = findViewById(android.R.id.content);
+        if (content == null) return;
+        content.setOnApplyWindowInsetsListener((v, insets) -> {
+            android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            v.setPadding(Math.max(dp(18), bars.left + dp(8)), Math.max(dp(10), bars.top + dp(8)),
+                    Math.max(dp(18), bars.right + dp(8)), Math.max(dp(12), bars.bottom + dp(8)));
+            return insets;
+        });
+    }
+
+    private Button button(String text) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setTextSize(14);
+        b.setAllCaps(false);
+        return b;
+    }
+
     private int dp(int n) { return (int)(n * getResources().getDisplayMetrics().density); }
 
     private void showSettings() {
-        int p = dp(12);
+        int p = dp(14);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(p,p,p,p);
+
         TextView note = new TextView(this);
-        note.setText("Önerilen: kendi güvenli Lakdoz sunucunu kullan. Kişisel test için API anahtarını bu cihazda Android Keystore ile şifreli saklayabilirsin. Anahtar APK'nın içine gömülmez.");
+        note.setText("Gemini varsayılan AI motorudur. Anahtar cihazda Android Keystore ile şifrelenir ve APK'ya gömülmez. Sohbette paylaşılan anahtarları kullanma; yeni anahtar oluşturup buraya yapıştır.");
         note.setTextSize(14);
         box.addView(note);
 
+        EditText key = new EditText(this);
+        key.setHint(settings.getGeminiApiKey().isEmpty() ? "Gemini API anahtarı" : "Gemini anahtarı kayıtlı • değiştirmek için yenisini gir");
+        key.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        box.addView(key);
+
+        EditText model = new EditText(this);
+        model.setHint("Gemini modeli");
+        model.setText(settings.getGeminiModel());
+        box.addView(model);
+
         EditText backend = new EditText(this);
-        backend.setHint("Güvenli sunucu URL'si (opsiyonel)");
+        backend.setHint("Lakdoz güvenli sunucu URL'si (opsiyonel)");
         backend.setText(settings.getBackendUrl());
         box.addView(backend);
-        EditText key = new EditText(this);
-        key.setHint("OpenAI API anahtarı (kişisel test modu)");
-        key.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        key.setText(settings.getApiKey());
-        box.addView(key);
-        EditText model = new EditText(this);
-        model.setHint("Model");
-        model.setText(settings.getModel());
-        box.addView(model);
-        CheckBox web = new CheckBox(this);
-        web.setText("Güncel sorularda web araması kullan");
-        web.setChecked(settings.isWebEnabled());
-        box.addView(web);
 
-        new AlertDialog.Builder(this).setTitle("Lakdoz AI bağlantısı").setView(box)
-                .setPositiveButton("Kaydet", (d,w) -> {
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Lakdoz AI • Gemini")
+                .setView(box)
+                .setPositiveButton("Kaydet", null)
+                .setNeutralButton("Bağlantıyı test et", null)
+                .setNegativeButton("İptal", null)
+                .create();
+
+        dialog.setOnShowListener(x -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                try {
+                    String newKey = key.getText().toString().trim();
+                    if (!newKey.isEmpty()) settings.setGeminiApiKey(newKey);
+                    settings.setGeminiModel(model.getText().toString());
+                    settings.setBackendUrl(backend.getText().toString());
+                    status.setText("Gemini ayarları kaydedildi.");
+                    dialog.dismiss();
+                } catch (Exception e) {
+                    Toast.makeText(this, "Kaydedilemedi: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                }
+            });
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+                try {
+                    String newKey = key.getText().toString().trim();
+                    if (!newKey.isEmpty()) settings.setGeminiApiKey(newKey);
+                    settings.setGeminiModel(model.getText().toString());
+                    settings.setBackendUrl(backend.getText().toString());
+                } catch (Exception e) {
+                    Toast.makeText(this, "Kaydedilemedi: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    return;
+                }
+                status.setText("Gemini bağlantısı test ediliyor…");
+                executor.execute(() -> {
+                    String msg;
                     try {
-                        settings.setBackendUrl(backend.getText().toString());
-                        settings.setApiKey(key.getText().toString());
-                        settings.setModel(model.getText().toString().trim().isEmpty() ? "gpt-5.6-luna" : model.getText().toString().trim());
-                        settings.setWebEnabled(web.isChecked());
-                        status.setText("AI bağlantısı kaydedildi.");
+                        msg = new AiClient(getApplicationContext()).testConnection();
                     } catch (Exception e) {
-                        Toast.makeText(this, "Kaydedilemedi: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        msg = "Bağlantı başarısız: " + (e.getMessage() == null ? "bilinmeyen hata" : e.getMessage());
                     }
-                }).setNegativeButton("İptal", null).show();
+                    final String out = msg;
+                    runOnUiThread(() -> {
+                        status.setText(out.startsWith("Bağlantı başarısız") ? out : "Gemini bağlantısı başarılı ✓");
+                        Toast.makeText(this, out, Toast.LENGTH_LONG).show();
+                    });
+                });
+            });
+        });
+        dialog.show();
     }
 
     private void submit(String text) {
         final String q = text == null ? "" : text.trim();
         if (q.isEmpty()) return;
+        if (settings.getGeminiApiKey().isEmpty() && settings.getBackendUrl().isEmpty()) {
+            status.setText("Gemini bağlantısı ayarlı değil.");
+            Toast.makeText(this, "Önce AI AYARLARI bölümünden Gemini API anahtarını ekle.", Toast.LENGTH_LONG).show();
+            showSettings();
+            return;
+        }
         input.setText("");
         List<HistoryStore.Turn> before = history.load();
         history.add("user", q);
@@ -190,7 +262,7 @@ public class MainActivity extends Activity {
             sb.append("user".equals(t.role) ? "Sen\n" : "Lakdoz\n");
             sb.append(t.text).append("\n\n");
         }
-        if (sb.length() == 0) sb.append("Merhaba. Bana bir şey sor. İstersen sesli de konuşabilirsin.");
+        if (sb.length() == 0) sb.append("Merhaba. Ben Lakdoz. Bana yazabilir veya sesli konuşabilirsin.");
         chat.setText(sb.toString());
         chat.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
     }

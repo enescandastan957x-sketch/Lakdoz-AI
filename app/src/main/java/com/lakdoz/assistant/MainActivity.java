@@ -141,7 +141,25 @@ public class MainActivity extends Activity {
         executor.execute(()->{try{String understood=smartInterpret(q,before,memory);LocalCommandRouter.Result local=new LocalCommandRouter(getApplicationContext()).tryHandle(understood,before);String answer;if(local.handled){answer=local.response;if(fromVoice)runOnUiThread(()->{listenTitle.setText("Lakdoz");listenPartial.setText(local.response);listenCaption.setText(settings.isContinuousVoice()?"Cevabım bitince seni tekrar dinleyeceğim":"Hazırım");});else runOnUiThread(()->streaming.setText(local.response));queueVoiceChunk(local.response);if(fromVoice&&settings.isContinuousVoice())queueAutoRelisten();}else{final StringBuilder voiceScreen=new StringBuilder();answer=new SmartAiOrchestrator(getApplicationContext()).ask(understood,before,memory,delta->{if(fromVoice){voiceScreen.append(delta);runOnUiThread(()->{listenTitle.setText("Lakdoz konuşuyor…");listenPartial.setText(voiceScreen.toString());listenCaption.setText("Cevap geliyor…");if(listenScroll!=null)listenScroll.post(()->listenScroll.fullScroll(View.FOCUS_DOWN));});}else runOnUiThread(()->{streaming.append(delta);scrollBottom();});consumeSpeechDelta(delta,false);});consumeSpeechDelta("",true);}history.add("assistant",answer);final String out=answer;runOnUiThread(()->{status.setText("● Hazır • Smart Core aktif");if(fromVoice){listenTitle.setText("Lakdoz");listenPartial.setText(out);listenCaption.setText(settings.isContinuousVoice()?"Cevabım bitince seni tekrar dinleyeceğim":"Hazırım • tekrar konuşabilirsin");if(listenScroll!=null)listenScroll.post(()->listenScroll.fullScroll(View.FOCUS_DOWN));if(settings.isContinuousVoice())queueAutoRelisten();}else refreshHistory();});}catch(Exception e){final String err=friendlyError(e);history.add("assistant",err);runOnUiThread(()->{status.setText("● Hazır");if(fromVoice){listenTitle.setText("Bir sorun oldu");listenPartial.setText(err);listenCaption.setText("Tekrar deneyebilirsin");}else refreshHistory();});}});
     }
 
+    private boolean needsInterpretation(String raw,List<HistoryStore.Turn> before){
+        String f=raw==null?"":raw.toLowerCase(Locale.forLanguageTag("tr-TR"));
+        if(f.contains("hava")||f.contains("yagmur")||f.contains("yağmur")||f.contains("sicak")||f.contains("sıcak")||
+                f.contains("ruzgar")||f.contains("rüzgar")||f.contains("derece")||f.contains("youtube")||
+                f.contains("alarm")||f.contains("whatsapp")||f.contains("instagram")||f.contains("spotify"))return true;
+        if(before!=null&&raw!=null&&raw.trim().length()<=90){
+            for(int i=before.size()-1,seen=0;i>=0&&seen<6;i--,seen++){
+                HistoryStore.Turn t=before.get(i);
+                if("assistant".equals(t.role)&&t.text!=null){
+                    String prior=t.text.toLowerCase(Locale.forLanguageTag("tr-TR"));
+                    if(prior.contains("hava")||prior.contains("yağış")||prior.contains("yagis")||prior.contains("rüzgar")||prior.contains("ruzgar"))return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private String smartInterpret(String raw,List<HistoryStore.Turn> before,String memory){
+        if(!needsInterpretation(raw,before))return raw;
         try{
             String instruction="Sen Lakdoz'ın Türkçe niyet ve yazım düzeltme katmanısın. Kullanıcı sıkça harf atlayabilir, yanlış tuşa basabilir, konuştuğu gibi yazabilir veya kelimeleri sesletildiği biçimde yazabilir. "
                     +"Mesajı cevaplama; yalnızca kullanıcının anlatmak istediği cümleyi doğal Türkçe ile yeniden yaz. "

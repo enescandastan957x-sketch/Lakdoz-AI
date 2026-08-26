@@ -5,11 +5,16 @@ import android.content.SharedPreferences;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 
 public class HistoryStore {
     private final SharedPreferences prefs;
-    private static final String KEY = "chat_history_v2";
+    private static final String OLD_KEY = "chat_history_v2";
+    private static final String THREADS_KEY = "chat_threads_v3";
+    private static final String ACTIVE_KEY = "active_chat_id_v3";
 
     public static final class Turn {
         public final String role;
@@ -17,39 +22,234 @@ public class HistoryStore {
         public Turn(String role, String text) { this.role = role; this.text = text; }
     }
 
+    public static final class ConversationMeta {
+        public final String id;
+        public final String title;
+        public final long updatedAt;
+        public final String preview;
+        public ConversationMeta(String id, String title, long updatedAt, String preview) {
+            this.id = id; this.title = title; this.updatedAt = updatedAt; this.preview = preview;
+        }
+    }
+
+    private static final class ThreadData {
+        String id;
+        String title;
+        long updatedAt;
+        final ArrayList<Turn> turns = new ArrayList<>();
+    }
+
     public HistoryStore(Context context) {
         prefs = context.getSharedPreferences("lakdoz", Context.MODE_PRIVATE);
+        migrateOldHistoryIfNeeded();
+        ensureActiveConversation();
     }
 
     public synchronized List<Turn> load() {
-        ArrayList<Turn> out = new ArrayList<>();
-        String raw = prefs.getString(KEY, "[]");
+        String active = getActiveConversationId();
+        for (ThreadData t : readThreads()) {
+            if (t.id.equals(active)) return new ArrayList<>(t.turns);
+        }
+        return new ArrayList<>();
+    }
+
+    public synchronized void add(String role, String text) {
+        if (text == null || text.trim().isEmpty()) return;
+        ArrayList<ThreadData> threads = readThreads();
+        String active = getActiveConversationId();
+        ThreadData target = null;
+        for (ThreadData t : threads) if (t.id.equals(active)) { target = t; break; }
+        if (target == null) {
+            target = newThread();
+            threads.add(target);
+            prefs.edit().putString(ACTIVE_KEY, target.id).apply();
+        }
+        String clean = text.trim();
+        target.turns.add(new Turn(role, clean));
+        while (target.turns.size() > 120) target.turns.remove(0);
+        if ("user".equals(role) && (target.title == null || target.title.isEmpty() || "Yeni sohbet".equals(target.title))) {
+            target.title = makeTitle(clean);
+        }
+        target.updatedAt = System.currentTimeMillis();
+        writeThreads(threads);
+    }
+
+    public synchronized String newConversation() {
+        ArrayList<ThreadData> threads = readThreads();
+        ThreadData t = newThread();
+        threads.add(t);
+        while (threads.size() > 60) {
+            Collections.sort(threads, Comparator.comparingLong(a -> a.updatedAt));
+            threads.remove(0);
+        }
+        writeThreads(threads);
+        prefs.edit().putString(ACTIVE_KEY, t.id).apply();
+        return t.id;
+    }
+
+    public synchronized void switchConversation(String id) {
+        if (id == null || id.isEmpty()) return;
+        for (ThreadData t : readThreads()) {
+            if (id.equals(t.id)) {
+                prefs.edit().putString(ACTIVE_KEY, id).apply();
+                return;
+            }
+        }
+    }
+
+    public synchronized String getActiveConversationId() {
+        String id = prefs.getString(ACTIVE_KEY, "");
+        return id == null ? "" : id;
+    }
+
+    public synchronized String getActiveTitle() {
+        String active = getActiveConversationId();
+        for (ThreadData t : readThreads()) if (t.id.equals(active)) return t.title;
+        return "Yeni sohbet";
+    }
+
+    public synchronized List<ConversationMeta> listConversations(String query) {
+        String q = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        ArrayList<ConversationMeta> out = new ArrayList<>();
+        for (ThreadData t : readThreads()) {
+            StringBuilder hay = new StringBuilder(t.title == null ? "" : t.title);
+            String preview = "";
+            for (int i = t.turns.size() - 1; i >= 0; i--) {
+                Turn turn = t.turns.get(i);
+                hay.append(' ').append(turn.text);
+                if (preview.isEmpty() && turn.text != null && !turn.text.isEmpty()) preview = turn.text;
+            }
+            if (!q.isEmpty() && !hay.toString().toLowerCase(Locale.ROOT).contains(q)) continue;
+            out.add(new ConversationMeta(t.id, safeTitle(t.title), t.updatedAt, preview));
+        }
+        Collections.sort(out, (a, b) -> Long.compare(b.updatedAt, a.updatedAt));
+        return out;
+    }
+
+    public synchronized void clear() {
+        ArrayList<ThreadData> threads = readThreads();
+        String active = getActiveConversationId();
+        for (ThreadData t : threads) {
+            if (t.id.equals(active)) {
+                t.turns.clear();
+                t.title = "Yeni sohbet";
+                t.updatedAt = System.currentTimeMillis();
+                break;
+            }
+        }
+        writeThreads(threads);
+    }
+
+    public synchronized void deleteActiveConversation() {
+        ArrayList<ThreadData> threads = readThreads();
+        String active = getActiveConversationId();
+        for (int i = threads.size() - 1; i >= 0; i--) if (threads.get(i).id.equals(active)) threads.remove(i);
+        if (threads.isEmpty()) threads.add(newThread());
+        Collections.sort(threads, (a,b) -> Long.compare(b.updatedAt, a.updatedAt));
+        prefs.edit().putString(ACTIVE_KEY, threads.get(0).id).apply();
+        writeThreads(threads);
+    }
+
+    private void ensureActiveConversation() {
+        ArrayList<ThreadData> threads = readThreads();
+        if (threads.isEmpty()) {
+            ThreadData t = newThread();
+            threads.add(t);
+            writeThreads(threads);
+            prefs.edit().putString(ACTIVE_KEY, t.id).apply();
+            return;
+        }
+        String active = getActiveConversationId();
+        for (ThreadData t : threads) if (t.id.equals(active)) return;
+        Collections.sort(threads, (a,b) -> Long.compare(b.updatedAt, a.updatedAt));
+        prefs.edit().putString(ACTIVE_KEY, threads.get(0).id).apply();
+    }
+
+    private void migrateOldHistoryIfNeeded() {
+        String existing = prefs.getString(THREADS_KEY, "");
+        if (existing != null && !existing.isEmpty()) return;
+        String raw = prefs.getString(OLD_KEY, "[]");
+        ArrayList<ThreadData> threads = new ArrayList<>();
+        ThreadData t = newThread();
         try {
-            JSONArray arr = new JSONArray(raw);
+            JSONArray arr = new JSONArray(raw == null ? "[]" : raw);
             for (int i = 0; i < arr.length(); i++) {
-                JSONObject o = arr.getJSONObject(i);
-                out.add(new Turn(o.optString("role", "assistant"), o.optString("text", "")));
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                String role = o.optString("role", "assistant");
+                String text = o.optString("text", "");
+                if (!text.trim().isEmpty()) t.turns.add(new Turn(role, text.trim()));
+                if ("user".equals(role) && "Yeni sohbet".equals(t.title) && !text.trim().isEmpty()) t.title = makeTitle(text);
+            }
+        } catch (Exception ignored) {}
+        threads.add(t);
+        writeThreads(threads);
+        prefs.edit().putString(ACTIVE_KEY, t.id).remove(OLD_KEY).apply();
+    }
+
+    private ThreadData newThread() {
+        ThreadData t = new ThreadData();
+        t.id = "c" + System.currentTimeMillis() + "_" + Math.abs((int)(Math.random() * 100000));
+        t.title = "Yeni sohbet";
+        t.updatedAt = System.currentTimeMillis();
+        return t;
+    }
+
+    private ArrayList<ThreadData> readThreads() {
+        ArrayList<ThreadData> out = new ArrayList<>();
+        String raw = prefs.getString(THREADS_KEY, "[]");
+        try {
+            JSONArray arr = new JSONArray(raw == null ? "[]" : raw);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                ThreadData t = new ThreadData();
+                t.id = o.optString("id", "");
+                t.title = safeTitle(o.optString("title", "Yeni sohbet"));
+                t.updatedAt = o.optLong("updated", System.currentTimeMillis());
+                JSONArray turns = o.optJSONArray("turns");
+                if (turns != null) {
+                    for (int j = 0; j < turns.length(); j++) {
+                        JSONObject x = turns.optJSONObject(j);
+                        if (x == null) continue;
+                        t.turns.add(new Turn(x.optString("role", "assistant"), x.optString("text", "")));
+                    }
+                }
+                if (!t.id.isEmpty()) out.add(t);
             }
         } catch (Exception ignored) {}
         return out;
     }
 
-    public synchronized void add(String role, String text) {
-        if (text == null || text.trim().isEmpty()) return;
-        List<Turn> turns = load();
-        turns.add(new Turn(role, text.trim()));
-        while (turns.size() > 80) turns.remove(0);
+    private void writeThreads(List<ThreadData> threads) {
         JSONArray arr = new JSONArray();
         try {
-            for (Turn t : turns) {
+            for (ThreadData t : threads) {
                 JSONObject o = new JSONObject();
-                o.put("role", t.role);
-                o.put("text", t.text);
+                o.put("id", t.id);
+                o.put("title", safeTitle(t.title));
+                o.put("updated", t.updatedAt);
+                JSONArray turns = new JSONArray();
+                for (Turn turn : t.turns) {
+                    JSONObject x = new JSONObject();
+                    x.put("role", turn.role);
+                    x.put("text", turn.text);
+                    turns.put(x);
+                }
+                o.put("turns", turns);
                 arr.put(o);
             }
-            prefs.edit().putString(KEY, arr.toString()).apply();
+            prefs.edit().putString(THREADS_KEY, arr.toString()).apply();
         } catch (Exception ignored) {}
     }
 
-    public synchronized void clear() { prefs.edit().remove(KEY).apply(); }
+    private String makeTitle(String text) {
+        String s = text == null ? "" : text.replace('\n', ' ').trim();
+        if (s.length() > 34) s = s.substring(0, 34).trim() + "…";
+        return s.isEmpty() ? "Yeni sohbet" : s;
+    }
+
+    private String safeTitle(String title) {
+        return title == null || title.trim().isEmpty() ? "Yeni sohbet" : title.trim();
+    }
 }

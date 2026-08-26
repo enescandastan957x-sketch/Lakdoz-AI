@@ -21,5 +21,5 @@ jobs:
         run: gradle :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: Lakdoz-AI-1.1.1-Context-Intelligence
+          name: Lakdoz-AI-1.1.2-General-Intelligence
           path: app/build/outputs/apk/debug/app-debug.apk

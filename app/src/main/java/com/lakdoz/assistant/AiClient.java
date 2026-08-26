@@ -8,6 +8,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -17,76 +18,89 @@ public class AiClient {
 
     public String ask(String prompt, List<HistoryStore.Turn> history) throws Exception {
         String backend = settings.getBackendUrl();
-        if (!backend.isEmpty()) return askBackend(backend, prompt, history);
-        String key = settings.getApiKey();
-        if (key.isEmpty()) throw new IllegalStateException("AI bağlantısı ayarlı değil. AI AYARLARI bölümünden API anahtarı veya güvenli sunucu adresi ekle.");
-        return askOpenAI(key, prompt, history);
+        if (backend != null && !backend.isEmpty()) return askBackend(backend, prompt, history);
+        String key = settings.getGeminiApiKey();
+        if (key == null || key.isEmpty()) {
+            throw new IllegalStateException("Gemini bağlantısı ayarlı değil. AI AYARLARI bölümünden Gemini API anahtarını ekle.");
+        }
+        return askGemini(key, prompt, history);
     }
 
-    private String askOpenAI(String key, String prompt, List<HistoryStore.Turn> history) throws Exception {
+    public String testConnection() throws Exception {
+        String key = settings.getGeminiApiKey();
+        if (key == null || key.isEmpty()) throw new IllegalStateException("Önce Gemini API anahtarını kaydet.");
+        return askGemini(key, "Sadece 'Bağlantı başarılı' yaz.", java.util.Collections.emptyList());
+    }
+
+    private String askGemini(String key, String prompt, List<HistoryStore.Turn> history) throws Exception {
+        String model = settings.getGeminiModel();
+        String endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" +
+                URLEncoder.encode(model, "UTF-8") + "/generateContent?key=" + URLEncoder.encode(key, "UTF-8");
+
         JSONObject body = new JSONObject();
-        body.put("model", settings.getModel());
-        body.put("instructions",
-                "Sen Lakdoz adlı Türkçe kişisel telefon yapay zekâ asistanısın. " +
-                "Kullanıcıya doğrudan, doğal ve yararlı cevap ver. Varsayılan dil Türkçe. " +
-                "Güncel bilgi gerekiyorsa web aramasını kullan. Kullanıcı yalnızca bilgi istiyorsa başka uygulama açtırma. " +
-                "Kesin olmadığın şeyi kesinmiş gibi söyleme. Kısa sorularda kısa, ayrıntı istenirse ayrıntılı cevap ver.");
-        JSONArray input = new JSONArray();
+        JSONArray contents = new JSONArray();
+
+        JSONObject system = new JSONObject();
+        system.put("role", "user");
+        JSONArray systemParts = new JSONArray();
+        systemParts.put(new JSONObject().put("text",
+                "Sen Lakdoz adlı Türkçe kişisel yapay zekâ asistansın. Doğal, yararlı ve kısa cevap ver. " +
+                "Varsayılan dil Türkçe. Kullanıcı bilgi soruyorsa cevabı doğrudan ver; uygulama açtırma. " +
+                "Kesin olmadığın şeyleri kesinmiş gibi söyleme. Telefon komutları uygulamanın yerel araçlarıyla çözülür."));
+        system.put("parts", systemParts);
+        contents.put(system);
+
         int start = Math.max(0, history.size() - 12);
         for (int i = start; i < history.size(); i++) {
             HistoryStore.Turn t = history.get(i);
-            JSONObject msg = new JSONObject();
-            msg.put("role", "assistant".equals(t.role) ? "assistant" : "user");
-            msg.put("content", t.text);
-            input.put(msg);
-        }
-        JSONObject current = new JSONObject();
-        current.put("role", "user");
-        current.put("content", prompt);
-        input.put(current);
-        body.put("input", input);
-        body.put("store", false);
-        JSONObject reasoning = new JSONObject();
-        reasoning.put("effort", "low");
-        body.put("reasoning", reasoning);
-        JSONObject text = new JSONObject();
-        text.put("verbosity", "medium");
-        body.put("text", text);
-        if (settings.isWebEnabled()) {
-            JSONArray tools = new JSONArray();
-            JSONObject web = new JSONObject();
-            web.put("type", "web_search");
-            tools.put(web);
-            body.put("tools", tools);
-            body.put("tool_choice", "auto");
+            JSONObject c = new JSONObject();
+            c.put("role", "assistant".equals(t.role) ? "model" : "user");
+            JSONArray parts = new JSONArray();
+            parts.put(new JSONObject().put("text", t.text));
+            c.put("parts", parts);
+            contents.put(c);
         }
 
-        HttpURLConnection c = open("https://api.openai.com/v1/responses");
-        c.setRequestProperty("Authorization", "Bearer " + key);
+        JSONObject current = new JSONObject();
+        current.put("role", "user");
+        current.put("parts", new JSONArray().put(new JSONObject().put("text", prompt)));
+        contents.put(current);
+        body.put("contents", contents);
+
+        JSONObject generation = new JSONObject();
+        generation.put("temperature", 0.6);
+        generation.put("maxOutputTokens", 1024);
+        body.put("generationConfig", generation);
+
+        HttpURLConnection c = open(endpoint);
         writeJson(c, body);
-        String raw = readResponse(c);
-        JSONObject json = new JSONObject(raw);
-        String direct = json.optString("output_text", "");
-        if (!direct.isEmpty()) return direct;
-        JSONArray output = json.optJSONArray("output");
-        if (output != null) {
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < output.length(); i++) {
-                JSONObject item = output.optJSONObject(i);
-                if (item == null || !"message".equals(item.optString("type"))) continue;
-                JSONArray content = item.optJSONArray("content");
-                if (content == null) continue;
-                for (int j = 0; j < content.length(); j++) {
-                    JSONObject part = content.optJSONObject(j);
-                    if (part != null && "output_text".equals(part.optString("type"))) {
-                        if (sb.length() > 0) sb.append("\n");
-                        sb.append(part.optString("text"));
+        JSONObject json = new JSONObject(readResponse(c));
+        JSONArray candidates = json.optJSONArray("candidates");
+        if (candidates != null && candidates.length() > 0) {
+            JSONObject content = candidates.optJSONObject(0).optJSONObject("content");
+            if (content != null) {
+                JSONArray parts = content.optJSONArray("parts");
+                if (parts != null) {
+                    StringBuilder sb = new StringBuilder();
+                    for (int i = 0; i < parts.length(); i++) {
+                        JSONObject part = parts.optJSONObject(i);
+                        if (part != null) {
+                            String text = part.optString("text", "");
+                            if (!text.isEmpty()) {
+                                if (sb.length() > 0) sb.append("\n");
+                                sb.append(text);
+                            }
+                        }
                     }
+                    if (sb.length() > 0) return sb.toString();
                 }
             }
-            if (sb.length() > 0) return sb.toString();
         }
-        throw new IllegalStateException("Model cevap döndürmedi.");
+        JSONObject feedback = json.optJSONObject("promptFeedback");
+        if (feedback != null) {
+            throw new IllegalStateException("Gemini isteği engellendi: " + feedback.toString());
+        }
+        throw new IllegalStateException("Gemini cevap döndürmedi.");
     }
 
     private String askBackend(String base, String prompt, List<HistoryStore.Turn> history) throws Exception {
@@ -96,10 +110,7 @@ public class AiClient {
         int start = Math.max(0, history.size() - 12);
         for (int i = start; i < history.size(); i++) {
             HistoryStore.Turn t = history.get(i);
-            JSONObject o = new JSONObject();
-            o.put("role", t.role);
-            o.put("text", t.text);
-            h.put(o);
+            h.put(new JSONObject().put("role", t.role).put("text", t.text));
         }
         body.put("history", h);
         HttpURLConnection c = open(base.replaceAll("/+$", "") + "/chat");
@@ -139,10 +150,11 @@ public class AiClient {
         if (code < 200 || code >= 300) {
             String msg = sb.toString();
             try {
-                JSONObject error = new JSONObject(msg).optJSONObject("error");
+                JSONObject root = new JSONObject(msg);
+                JSONObject error = root.optJSONObject("error");
                 if (error != null) msg = error.optString("message", msg);
             } catch (Exception ignored) {}
-            throw new IllegalStateException("AI servisi " + code + ": " + msg);
+            throw new IllegalStateException("Gemini servisi " + code + ": " + msg);
         }
         return sb.toString();
     }

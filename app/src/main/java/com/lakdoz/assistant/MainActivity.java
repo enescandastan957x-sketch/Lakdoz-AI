@@ -143,7 +143,7 @@ public class MainActivity extends Activity {
 
     private String smartInterpret(String raw,List<HistoryStore.Turn> before,String memory){
         try{
-            String instruction="Rewrite the user's intended message in natural Turkish. Correct likely typos and missing letters. Preserve the recent conversation topic, person, place, product and time when this is a follow-up. Do not invent a new entity. Return only the rewritten message. Input: "+raw;
+            String instruction="Rewrite the user's intended message in natural Turkish with MINIMAL changes. Correct likely typos, missing letters and casual shorthand. If it is clearly a follow-up, preserve the recent topic, person, place, product and time. Never invent a new city, person, product, event or fact. For very short or ambiguous input, do not expand it into a new meaning; keep it close to the original. Return only the rewritten user message, not an answer or explanation. Input: "+raw;
             String out=new AiClient(getApplicationContext()).askStreaming(instruction,before,memory,null);
             if(out==null)return raw;
             out=out.trim();

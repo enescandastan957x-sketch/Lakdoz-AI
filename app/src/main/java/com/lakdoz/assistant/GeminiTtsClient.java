@@ -3,7 +3,6 @@ package com.lakdoz.assistant;
 import android.content.Context;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
-import android.media.AudioManager;
 import android.media.AudioTrack;
 import android.util.Base64;
 import org.json.JSONArray;
@@ -23,11 +22,14 @@ public class GeminiTtsClient {
     }
 
     public void speak(String text) throws Exception {
+        speak(text, settings.getGeminiVoice(), settings.getGeminiVoiceStyle());
+    }
+
+    public void speak(String text, String voice, String style) throws Exception {
         if (text == null || text.trim().isEmpty()) return;
         String key = settings.getGeminiApiKey();
         if (key == null || key.trim().isEmpty()) throw new IllegalStateException("Gemini API anahtarı yok.");
-
-        AudioData audio = synthesize(key.trim(), settings.getGeminiVoice(), settings.getGeminiVoiceStyle(), text.trim());
+        AudioData audio = synthesize(key.trim(), voice, style, text.trim());
         play(audio);
     }
 
@@ -35,12 +37,12 @@ public class GeminiTtsClient {
         String endpoint = "https://generativelanguage.googleapis.com/v1beta/interactions";
         JSONObject body = new JSONObject();
         body.put("model", "gemini-2.5-flash-preview-tts");
-        String prompt = (style == null || style.trim().isEmpty() ? "Doğal ve akıcı bir Türkçe ile konuş." : style.trim())
-                + "\n\nMetni aynen seslendir:\n" + text;
+        String prompt = (style == null || style.trim().isEmpty() ? "Doğal, sıcak ve akıcı bir Türkçe ile konuş." : style.trim())
+                + "\n\nAşağıdaki metni anlamını değiştirmeden seslendir:\n" + text;
         body.put("input", prompt);
         body.put("response_format", new JSONObject().put("type", "audio"));
         JSONObject generation = new JSONObject();
-        generation.put("speech_config", new JSONArray().put(new JSONObject().put("voice", voice)));
+        generation.put("speech_config", new JSONArray().put(new JSONObject().put("voice", voice == null ? "Kore" : voice)));
         body.put("generation_config", generation);
 
         HttpURLConnection c = (HttpURLConnection) new URL(endpoint).openConnection();
@@ -83,7 +85,7 @@ public class GeminiTtsClient {
         if (node instanceof JSONObject) {
             JSONObject o = (JSONObject) node;
             if ("audio".equals(o.optString("type")) && !o.optString("data", "").isEmpty()) return o;
-            if (!o.optString("data", "").isEmpty() && o.has("sample_rate")) return o;
+            if (!o.optString("data", "").isEmpty() && (o.has("sample_rate") || o.has("mime_type"))) return o;
             JSONArray names = o.names();
             if (names != null) {
                 for (int i = 0; i < names.length(); i++) {
@@ -108,7 +110,8 @@ public class GeminiTtsClient {
         if (audio.mime.contains("wav") || isWav(pcm)) offset = findWavDataOffset(pcm);
         int channelMask = audio.channels > 1 ? AudioFormat.CHANNEL_OUT_STEREO : AudioFormat.CHANNEL_OUT_MONO;
         int min = AudioTrack.getMinBufferSize(audio.sampleRate, channelMask, AudioFormat.ENCODING_PCM_16BIT);
-        int size = Math.max(min, pcm.length - offset);
+        int payload = Math.max(0, pcm.length - offset);
+        int size = Math.max(min, payload);
         AudioTrack track = new AudioTrack.Builder()
                 .setAudioAttributes(new AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ASSISTANT)
@@ -122,10 +125,15 @@ public class GeminiTtsClient {
                 .setBufferSizeInBytes(size)
                 .setTransferMode(AudioTrack.MODE_STATIC)
                 .build();
-        track.write(pcm, offset, pcm.length - offset);
-        track.setNotificationMarkerPosition(Math.max(1, (pcm.length - offset) / 2));
+        track.write(pcm, offset, payload);
+        int bytesPerFrame = 2 * Math.max(1, audio.channels);
+        int frames = Math.max(1, payload / bytesPerFrame);
+        track.setNotificationMarkerPosition(frames);
         track.setPlaybackPositionUpdateListener(new AudioTrack.OnPlaybackPositionUpdateListener() {
-            public void onMarkerReached(AudioTrack t) { t.stop(); t.release(); }
+            public void onMarkerReached(AudioTrack t) {
+                try { t.stop(); } catch (Exception ignored) {}
+                t.release();
+            }
             public void onPeriodicNotification(AudioTrack t) {}
         });
         track.play();

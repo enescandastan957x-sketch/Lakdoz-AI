@@ -158,12 +158,54 @@ public class HistoryStore {
         for (String p : norm.split("\\s+")) {
             if (p.length() < 3) continue;
             if (p.equals("ve") || p.equals("bir") || p.equals("ile") || p.equals("için") || p.equals("ama") || p.equals("gibi") || p.equals("daha") || p.equals("bana")) continue;
+            String root = softStem(p);
             out.add(p);
+            out.add(root);
+            addSynonyms(out, root);
         }
         return out;
     }
 
-    private int overlap(Set<String> a, Set<String> b) { int n=0; for (String x:a) if (b.contains(x)) n++; return n; }
+    private String softStem(String p) {
+        String x = p;
+        String[] suffixes = {"lerden","lardan","lerin","ların","leri","ları","lerde","larda","den","dan","nin","nın","nun","nün","de","da","ye","ya","yi","yı","yu","yü"};
+        for (String s : suffixes) if (x.length() > s.length() + 3 && x.endsWith(s)) { x = x.substring(0, x.length() - s.length()); break; }
+        return x;
+    }
+
+    private void addSynonyms(Set<String> out, String x) {
+        if (x.contains("hava") || x.contains("sicak") || x.contains("sıcak")) { out.add("weather"); out.add("iklim"); }
+        if (x.contains("video")) { out.add("film"); out.add("klip"); }
+        if (x.contains("yapay") || x.equals("ai")) { out.add("ai"); out.add("yapayzeka"); }
+        if (x.contains("ses")) { out.add("voice"); out.add("konusma"); }
+        if (x.contains("telefon")) { out.add("mobil"); out.add("android"); }
+        if (x.contains("traş") || x.contains("tıraş") || x.contains("sakal")) { out.add("sakal"); out.add("tiras"); }
+    }
+
+    private int overlap(Set<String> a, Set<String> b) {
+        int n=0;
+        for (String x:a) {
+            if (b.contains(x)) { n++; continue; }
+            for (String y:b) {
+                if (x.length() >= 5 && y.length() >= 5 && fuzzyClose(x,y)) { n++; break; }
+            }
+        }
+        return n;
+    }
+
+    private boolean fuzzyClose(String a, String b) {
+        if (Math.abs(a.length()-b.length()) > 2) return false;
+        int i=0,j=0,edits=0;
+        while(i<a.length() && j<b.length()) {
+            if(a.charAt(i)==b.charAt(j)){i++;j++;continue;}
+            if(++edits>1)return false;
+            if(a.length()>b.length())i++;
+            else if(b.length()>a.length())j++;
+            else{i++;j++;}
+        }
+        if(i<a.length()||j<b.length())edits++;
+        return edits<=1;
+    }
     private String shorten(String s, int max) { if (s == null) return ""; s=s.trim(); return s.length() <= max ? s : s.substring(0,max).trim()+"…"; }
 
     public synchronized String newConversation() {

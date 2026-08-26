@@ -10,7 +10,7 @@ android {
         applicationId = "com.lakdoz.assistant"
         minSdk = 29
         targetSdk = 35
-        versionCode = 116
-        versionName = "1.0.6"
+        versionCode = 120
+        versionName = "1.1.0"
     }
 }

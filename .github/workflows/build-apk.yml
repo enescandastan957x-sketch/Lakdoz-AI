@@ -21,5 +21,5 @@ jobs:
         run: gradle :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: Lakdoz-AI-1.0.5-Keyboard-Mascot-Voice
+          name: Lakdoz-AI-1.0.6-LiveSources
           path: app/build/outputs/apk/debug/app-debug.apk

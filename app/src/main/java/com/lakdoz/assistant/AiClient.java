@@ -26,11 +26,16 @@ public class AiClient {
     public String askStreaming(String prompt,List<HistoryStore.Turn> history,String memory,DeltaListener listener)throws Exception{
         String key=settings.getGeminiApiKey(); if(key==null||key.trim().isEmpty())throw new IllegalStateException("Lakdoz AI bağlantısı ayarlı değil. Ayarlar bölümünden bağlantı anahtarını ekle."); key=key.trim();
         Exception last=null; String cached=cleanModelName(settings.getGeminiModel());
-        if(!cached.isEmpty()){try{String a=streamModel(key,cached,prompt,history,memory,listener);settings.setGeminiModel(cached);return a;}catch(Exception e){last=e;if(!canFallback(e))throw e;}}
-        List<ModelCandidate> available=discoverModels(key); if(available.isEmpty()){if(last!=null)throw last;throw new IllegalStateException("Bu bağlantı için uygun AI modeli bulunamadı.");}
+        if(!cached.isEmpty()){try{String a=streamModel(key,cached,prompt,history,memory,listener);settings.setGeminiModel(cached);return a;}catch(Exception e){last=e;if(isModelNotFound(e))settings.setGeminiModel("");if(!canFallback(e))throw e;}}
+        List<ModelCandidate> available;
+        try{available=discoverModels(key);}catch(Exception e){last=e;available=new ArrayList<>();}
+        addKnownFallbacks(available);
+        if(available.isEmpty()){if(last!=null&&canFallback(last))throw new IllegalStateException("Lakdoz AI modeli güncelleniyor. Lütfen tekrar dene.");throw new IllegalStateException("Lakdoz AI için uygun bağlantı bulunamadı.");}
         int tried=0; for(ModelCandidate c:available){if(c.name.equals(cached))continue;if(tried++>=3)break;try{String a=c.stream?streamModel(key,c.name,prompt,history,memory,listener):generateModel(key,c.name,prompt,history,memory,listener);settings.setGeminiModel(c.name);return a;}catch(Exception e){last=e;if(!canFallback(e))throw e;}}
-        throw last==null?new IllegalStateException("Lakdoz AI şu anda yanıt veremiyor."):last;
+        throw new IllegalStateException("Lakdoz AI şu anda yanıt veremiyor. Lütfen tekrar dene.");
     }
+    private void addKnownFallbacks(List<ModelCandidate> models){String[] names={"gemini-3.6-flash","gemini-3.5-flash","gemini-3.1-flash-lite","gemini-3-flash-preview"};for(int i=names.length-1;i>=0;i--){String name=names[i];boolean found=false;for(ModelCandidate c:models)if(c.name.equals(name)){found=true;break;}if(!found)models.add(0,new ModelCandidate(name,false,10000-i));}}
+    private boolean isModelNotFound(Exception e){String m=e.getMessage()==null?"":e.getMessage().toLowerCase();return m.contains("http 404")||m.contains("model bulunamadı")||m.contains("not found");}
     public String testConnection()throws Exception{return askStreaming("Türkçe olarak yalnızca 'Bağlantı başarılı' yaz.",Collections.emptyList(),"",null);}
     private List<ModelCandidate> discoverModels(String key)throws Exception{
         String endpoint="https://generativelanguage.googleapis.com/v1beta/models?pageSize=100&key="+URLEncoder.encode(key,"UTF-8");HttpURLConnection c=(HttpURLConnection)new URL(endpoint).openConnection();c.setRequestMethod("GET");c.setConnectTimeout(7000);c.setReadTimeout(12000);int code=c.getResponseCode();if(code<200||code>=300)throw httpError(c,code,"models.list");

@@ -24,7 +24,7 @@ public class SmartAiOrchestrator {
             return new AiClient(context).askStreaming(prompt,history,memory,null);
         }});
         Future<List<String>> free=pool.submit(new Callable<List<String>>(){public List<String> call()throws Exception{
-            return new OpenRouterClient(context).askFreeCandidates(prompt,history,memory);
+            return new OpenRouterClient(context).askFreeCandidates(prompt,history,memory,needsDeepEnsemble(prompt)?3:1);
         }});
         String a="";List<String> freeAnswers=new java.util.ArrayList<>();
         try{a=gem.get(24,TimeUnit.SECONDS);}catch(Exception ignored){}
@@ -52,6 +52,14 @@ public class SmartAiOrchestrator {
         for(int i=0;i<freeAnswers.size();i++)synthesis.append("\n\nÜcretsiz model aday cevabı ").append(i+1).append(":\n").append(freeAnswers.get(i));
         synthesis.append("\n\nGörev: Önce sorunun gerçek niyetini bağlamdan anla. Aday cevapların ortak ve doğrulanabilir noktalarını birleştir. Çelişki varsa iki tarafı da kesinmiş gibi sunma; belirsizliği kısaca belirt. Yanlış veya konu dışı adayları ele. Gerekirse canlı doğrulama gerektiğini söyle. Kullanıcıya tek, doğal ve doğrudan Türkçe cevap ver; model isimlerinden veya bu birleştirme işleminden bahsetme.");
         return new AiClient(context).askStreaming(synthesis.toString(),history,memory,listener);
+    }
+
+    private boolean needsDeepEnsemble(String prompt){
+        String p=prompt==null?"":prompt.toLowerCase(new Locale("tr","TR"));
+        if(p.length()>120)return true;
+        String[] cues={"karşılaştır","karsilastir","hangisi","neden","analiz","araştır","arastir","detaylı","detayli","en iyi","mantıklı","mantikli","doğru mu","dogru mu","avantaj","dezavantaj","plan yap","strateji","öner","oner","risk","sağlık","saglik","hukuk","yasal","para","yatırım","yatirim"};
+        for(String c:cues)if(p.contains(c))return true;
+        return false;
     }
 
     private boolean shouldEnsemble(String prompt){

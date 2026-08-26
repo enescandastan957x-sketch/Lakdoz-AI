@@ -42,11 +42,13 @@ public class SecureSettings {
 
     public void setSoundEnabled(boolean enabled) { prefs.edit().putBoolean("sound_enabled", enabled).apply(); }
     public boolean isSoundEnabled() { return prefs.getBoolean("sound_enabled", true); }
+    public void setContinuousVoice(boolean enabled) { prefs.edit().putBoolean("continuous_voice", enabled).apply(); }
+    public boolean isContinuousVoice() { return prefs.getBoolean("continuous_voice", true); }
 
     public void setVoiceName(String name) { prefs.edit().putString("voice_name", name == null ? "" : name).apply(); }
     public String getVoiceName() { return prefs.getString("voice_name", ""); }
     public void setSpeechRate(float value) { prefs.edit().putFloat("speech_rate", value).apply(); }
-    public float getSpeechRate() { return prefs.getFloat("speech_rate", 1.03f); }
+    public float getSpeechRate() { return prefs.getFloat("speech_rate", 1.18f); }
     public void setSpeechPitch(float value) { prefs.edit().putFloat("speech_pitch", value).apply(); }
     public float getSpeechPitch() { return prefs.getFloat("speech_pitch", 1.0f); }
 

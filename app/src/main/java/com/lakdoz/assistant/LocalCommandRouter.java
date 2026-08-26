@@ -149,27 +149,40 @@ public class LocalCommandRouter {
 
     private String extractWeatherPlace(String raw, List<HistoryStore.Turn> history) {
         String s = raw == null ? "" : raw.trim();
-        String cleaned = s.replaceAll("(?iu)\\b(hava\\s*durumu|hava|kaç\\s*derece|kac\\s*derece|sıcaklık|sicaklik|bugün|bugun|yarın|yarin|nasıl|nasil|ne\\s*kadar|ne|şu\\s*an|su\\s*an|internetten|bak|ara|öğren|ogren|göster|goster|yağmur|yagmur|var\\s*mı|var\\s*mi|olacak|sonra|birazdan|akşam|aksam|gece|sabah|için|icin)\\b", " ")
-                .replaceAll("(?iu)\\b\\d+\\s*saat\\b", " ")
+        String f = fold(s);
+        String remembered = lastWeatherPlace(history);
+        String persisted = contextPrefs.getString("last_weather_place", "");
+        if (persisted == null) persisted = "";
+
+        if (mentionsPalma(f)) return "Palma de Mallorca";
+
+        boolean followUp = f.contains("saat") || f.contains("saate") || f.contains("sonra") ||
+                f.contains("yagmur") || f.contains("ruzgar") || f.contains("derece") ||
+                f.contains("gece") || f.contains("aksam") || f.contains("sabah") ||
+                f.contains("yarin") || f.contains("orada") || f.contains("ayni") ||
+                f.contains("ortalama") || f.contains("peki");
+
+        if (followUp) {
+            if (!remembered.isEmpty()) return remembered;
+            if (!persisted.trim().isEmpty()) return persisted.trim();
+        }
+
+        String cleaned = s.replaceAll("(?iu)\\b(hava\\s*durumu|hava|kaç\\s*derece|kac\\s*derece|sıcaklık|sicaklik|bugün|bugun|yarın|yarin|nasıl|nasil|ne\\s*kadar|ne|şu\\s*an|su\\s*an|internetten|bak|ara|öğren|ogren|göster|goster|yağmur|yagmur|var\\s*mı|var\\s*mi|olacak|sonra|birazdan|akşam|aksam|gece|sabah|için|icin|soruyorum|ortalama|peki)\\b", " ")
+                .replaceAll("(?iu)\\b\\d+\\s*(?:saat|saate|saatte|saatlik)\\b", " ")
                 .replaceAll("[?!.]+", " ").replaceAll("\\s+", " ").trim();
 
         if (looksLikePlace(cleaned)) return cleaned;
-
-        String remembered = lastWeatherPlace(history);
         if (!remembered.isEmpty()) return remembered;
-        String persisted = contextPrefs.getString("last_weather_place", "");
-        if (persisted != null && !persisted.trim().isEmpty()) return persisted.trim();
-
-        if (history != null) {
-            for (int i = history.size() - 1; i >= 0; i--) {
-                HistoryStore.Turn t = history.get(i);
-                if (!"user".equals(t.role)) continue;
-                String candidate = t.text == null ? "" : t.text.trim();
-                String f = fold(candidate);
-                if (!f.contains("hava") && !f.contains("sicaklik") && !f.contains("kac derece") && looksLikePlace(candidate)) return candidate;
-            }
-        }
+        if (!persisted.trim().isEmpty()) return persisted.trim();
         return "";
+    }
+
+    private boolean mentionsPalma(String folded) {
+        if (folded.contains("palma") || folded.contains("mallorca") || folded.contains("mallorka")) return true;
+        for (String token : folded.split("[^a-z0-9]+")) {
+            if (token.length() >= 4 && levenshtein(token, "palma") <= 2) return true;
+        }
+        return false;
     }
 
     private boolean looksLikePlace(String s) {
@@ -207,7 +220,7 @@ public class LocalCommandRouter {
 
     private int extractHoursAhead(String raw) {
         String f = fold(raw);
-        Matcher m = Pattern.compile("(\\d{1,2})\\s*saat\\s*sonra").matcher(f);
+        Matcher m = Pattern.compile("(\\d{1,2})\\s*(?:saat|saate|saatte|saatlik)(?:\\s*sonra)?").matcher(f);
         if (m.find()) {
             try { return Math.max(1, Math.min(48, Integer.parseInt(m.group(1)))); } catch (Exception ignored) {}
         }
@@ -324,7 +337,7 @@ public class LocalCommandRouter {
             if (population > 100000) score += 1;
             if (score > bestScore) { bestScore = score; best = r; }
         }
-        return best;
+        return bestScore >= 2 ? best : null;
     }
 
     private int levenshtein(String a, String b) {

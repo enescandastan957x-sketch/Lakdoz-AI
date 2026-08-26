@@ -93,6 +93,10 @@ public class HistoryStore {
         int recentThreads = 0;
         for (ThreadData t : recent) {
             if (t.id.equals(active) || t.turns.isEmpty()) continue;
+            // İlgisiz eski sohbetleri her soruya eklemek bağlamı kirletir.
+            // Kullanıcı açıkça hafıza istemediyse yalnızca konu olarak eşleşen
+            // sohbetleri taşırız; yazım hataları overlap/fuzzyClose ile tolere edilir.
+            if (!explicitMemory && !threadMatches(t, qTokens)) continue;
             StringBuilder line = new StringBuilder();
             line.append("[").append(safeTitle(t.title)).append("] ");
             int start = Math.max(0, t.turns.size() - (explicitMemory ? 4 : 2));
@@ -206,6 +210,18 @@ public class HistoryStore {
         if(i<a.length()||j<b.length())edits++;
         return edits<=1;
     }
+    private boolean threadMatches(ThreadData thread, Set<String> qTokens) {
+        if (thread == null || qTokens == null || qTokens.isEmpty()) return false;
+        int best = overlap(qTokens, tokenize(thread.title == null ? "" : thread.title));
+        for (Turn turn : thread.turns) {
+            if (turn != null && turn.text != null) {
+                best = Math.max(best, overlap(qTokens, tokenize(turn.text)));
+                if (best >= 2) return true;
+            }
+        }
+        return best > 0;
+    }
+
     private String shorten(String s, int max) { if (s == null) return ""; s=s.trim(); return s.length() <= max ? s : s.substring(0,max).trim()+"…"; }
 
     public synchronized String newConversation() {

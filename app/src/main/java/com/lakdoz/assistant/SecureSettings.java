@@ -33,6 +33,16 @@ public class SecureSettings {
         return model == null || model.trim().isEmpty() ? "gemini-2.5-flash" : model.trim();
     }
 
+    public void setUseGeminiVoice(boolean enabled) { prefs.edit().putBoolean("use_gemini_voice", enabled).apply(); }
+    public boolean useGeminiVoice() { return prefs.getBoolean("use_gemini_voice", true); }
+    public void setGeminiVoice(String name) { prefs.edit().putString("gemini_voice", name == null ? "Kore" : name).apply(); }
+    public String getGeminiVoice() {
+        String v = prefs.getString("gemini_voice", "Kore");
+        return v == null || v.trim().isEmpty() ? "Kore" : v.trim();
+    }
+    public void setGeminiVoiceStyle(String style) { prefs.edit().putString("gemini_voice_style", style == null ? "" : style).apply(); }
+    public String getGeminiVoiceStyle() { return prefs.getString("gemini_voice_style", "Doğal, sıcak ve akıcı bir Türkçe ile konuş."); }
+
     public void setVoiceName(String name) { prefs.edit().putString("voice_name", name == null ? "" : name).apply(); }
     public String getVoiceName() { return prefs.getString("voice_name", ""); }
     public void setSpeechRate(float value) { prefs.edit().putFloat("speech_rate", value).apply(); }

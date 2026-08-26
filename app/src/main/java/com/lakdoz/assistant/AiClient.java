@@ -12,9 +12,11 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 
 public class AiClient {
     private final SecureSettings settings;
+    private final Random random = new Random();
 
     public AiClient(Context context) {
         settings = new SecureSettings(context);
@@ -38,24 +40,59 @@ public class AiClient {
 
     private String askWithFallback(String key, String prompt, List<HistoryStore.Turn> history) throws Exception {
         ArrayList<String> models = new ArrayList<>();
+        // Free-tier friendly, stable models first. If one is busy, Lakdoz moves on automatically.
+        addModel(models, "gemini-2.5-flash");
+        addModel(models, "gemini-2.5-flash-lite");
         addModel(models, settings.getGeminiModel());
-        addModel(models, "gemini-flash-latest");
         addModel(models, "gemini-3.7-flash");
         addModel(models, "gemini-3.6-flash");
 
         Exception last = null;
         for (String model : models) {
             try {
-                String answer = askGemini(key, model, prompt, history);
+                String answer = askModelWithRetry(key, model, prompt, history);
                 settings.setGeminiModel(model);
                 return answer;
             } catch (IllegalStateException e) {
                 last = e;
-                String m = e.getMessage() == null ? "" : e.getMessage();
-                if (!m.contains("HTTP 404")) throw e;
+                String msg = safeMessage(e);
+                if (!isModelFallbackError(msg)) throw e;
             }
         }
-        throw last == null ? new IllegalStateException("Uygun Gemini modeli bulunamadı.") : last;
+        throw last == null ? new IllegalStateException("Gemini şu anda cevap veremiyor.") : last;
+    }
+
+    private String askModelWithRetry(String key, String model, String prompt, List<HistoryStore.Turn> history) throws Exception {
+        IllegalStateException last = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                return askGemini(key, model, prompt, history);
+            } catch (IllegalStateException e) {
+                last = e;
+                String msg = safeMessage(e);
+                if (!isTransient(msg) || attempt == 2) throw e;
+                long delay = (long)(900 * Math.pow(2, attempt)) + random.nextInt(300);
+                try { Thread.sleep(delay); }
+                catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
+        throw last == null ? new IllegalStateException("Gemini yanıt vermedi.") : last;
+    }
+
+    private boolean isTransient(String msg) {
+        return msg.contains("HTTP 408") || msg.contains("HTTP 429") || msg.contains("HTTP 500") ||
+                msg.contains("HTTP 502") || msg.contains("HTTP 503") || msg.contains("HTTP 504");
+    }
+
+    private boolean isModelFallbackError(String msg) {
+        return msg.contains("HTTP 404") || isTransient(msg);
+    }
+
+    private String safeMessage(Exception e) {
+        return e.getMessage() == null ? "" : e.getMessage();
     }
 
     private void addModel(ArrayList<String> list, String model) {
@@ -132,7 +169,7 @@ public class AiClient {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setRequestMethod("POST");
         c.setConnectTimeout(15000);
-        c.setReadTimeout(90000);
+        c.setReadTimeout(45000);
         c.setDoOutput(true);
         c.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         return c;
@@ -167,7 +204,11 @@ public class AiClient {
             if (code == 404)
                 throw new IllegalStateException("Gemini modeli bulunamadı: " + model + " (HTTP 404)");
             if (code == 429)
-                throw new IllegalStateException("Gemini kullanım kotasına ulaşıldı. Bir süre sonra tekrar dene. (HTTP 429)");
+                throw new IllegalStateException("Gemini kullanım sınırına ulaşıldı. (HTTP 429)");
+            if (code == 503)
+                throw new IllegalStateException("Gemini geçici olarak yoğun. (HTTP 503)");
+            if (code == 500 || code == 502 || code == 504)
+                throw new IllegalStateException("Gemini geçici servis hatası. (HTTP " + code + ")");
             throw new IllegalStateException("Gemini servisi HTTP " + code + ": " + msg);
         }
         return sb.toString();

@@ -10,6 +10,7 @@ import android.graphics.Typeface;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.Build;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -22,6 +23,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -79,7 +81,7 @@ public class MainActivity extends Activity {
     };
 
     @Override public void onCreate(Bundle state){
-        super.onCreate(state);history=new HistoryStore(this);settings=new SecureSettings(this);initSystemTts();setContentView(buildUi());applyInsets();refreshHistory();ensureMic();
+        super.onCreate(state);getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);history=new HistoryStore(this);settings=new SecureSettings(this);initSystemTts();setContentView(buildUi());applyInsets();refreshHistory();ensureMic();
         if(settings.getGeminiApiKey().isEmpty())status.setText("● Lakdoz AI bağlantısı ayarlı değil");
     }
 
@@ -92,7 +94,7 @@ public class MainActivity extends Activity {
         LinearLayout titles=new LinearLayout(this);titles.setOrientation(LinearLayout.VERTICAL);currentTitle=new TextView(this);currentTitle.setText("Yeni sohbet");currentTitle.setTextColor(Color.WHITE);currentTitle.setTextSize(21);currentTitle.setTypeface(Typeface.DEFAULT_BOLD);currentTitle.setSingleLine(true);currentTitle.setEllipsize(TextUtils.TruncateAt.END);titles.addView(currentTitle);TextView version=new TextView(this);version.setText("Lakdoz AI • Akıllı Hafıza • Canlı Sohbet");version.setTextColor(MUTED);version.setTextSize(11);titles.addView(version);header.addView(titles,new LinearLayout.LayoutParams(0,-2,1));Button settingsBtn=iconButton("⚙");settingsBtn.setOnClickListener(v->showSettings());header.addView(settingsBtn,new LinearLayout.LayoutParams(dp(48),dp(46)));main.addView(header);
         status=new TextView(this);status.setText("● Hazır • Tüm sohbet hafızası bağlı");status.setTextColor(CYAN);status.setTextSize(12);status.setPadding(dp(112),0,0,dp(7));main.addView(status);
         messageScroll=new ScrollView(this);messageScroll.setFillViewport(true);messageScroll.setVerticalScrollBarEnabled(false);messageList=new LinearLayout(this);messageList.setOrientation(LinearLayout.VERTICAL);messageList.setPadding(0,dp(6),0,dp(14));messageScroll.addView(messageList);main.addView(messageScroll,new LinearLayout.LayoutParams(-1,0,1));
-        LinearLayout composer=new LinearLayout(this);composer.setOrientation(LinearLayout.VERTICAL);composer.setPadding(dp(8),dp(8),dp(8),dp(8));composer.setBackground(rounded(Color.rgb(12,20,34),22));input=new EditText(this);input.setHint("Lakdoz'a mesaj yaz…");input.setHintTextColor(Color.rgb(108,121,143));input.setTextColor(TEXT);input.setTextSize(16);input.setMinLines(2);input.setMaxLines(5);input.setPadding(dp(13),dp(10),dp(13),dp(10));input.setBackground(rounded(CARD,17));composer.addView(input);
+        LinearLayout composer=new LinearLayout(this);composer.setOrientation(LinearLayout.VERTICAL);composer.setPadding(dp(8),dp(8),dp(8),dp(8));composer.setBackground(rounded(Color.rgb(12,20,34),22));input=new EditText(this);input.setHint("Lakdoz'a mesaj yaz…");input.setHintTextColor(Color.rgb(108,121,143));input.setTextColor(TEXT);input.setTextSize(16);input.setMinLines(2);input.setMaxLines(5);input.setPadding(dp(13),dp(10),dp(13),dp(10));input.setBackground(rounded(CARD,17));input.setOnFocusChangeListener((v,hasFocus)->{if(hasFocus){v.postDelayed(()->{View content=findViewById(android.R.id.content);if(content!=null)content.requestApplyInsets();},80);}});composer.addView(input);
         LinearLayout actions=new LinearLayout(this);actions.setPadding(0,dp(8),0,0);Button talk=actionButton("🎙 Konuş",Color.rgb(30,45,69));Button send=actionButton("Gönder ➜",Color.rgb(70,91,205));talk.setOnClickListener(v->listen());send.setOnClickListener(v->submit(input.getText().toString(),false));LinearLayout.LayoutParams p1=new LinearLayout.LayoutParams(0,dp(50),1);p1.setMargins(dp(3),0,dp(3),0);actions.addView(talk,p1);LinearLayout.LayoutParams p2=new LinearLayout.LayoutParams(0,dp(50),1);p2.setMargins(dp(3),0,dp(3),0);actions.addView(send,p2);composer.addView(actions);main.addView(composer);
         scrim=new View(this);scrim.setBackgroundColor(Color.argb(165,0,0,0));scrim.setVisibility(View.GONE);scrim.setOnClickListener(v->closeDrawer());root.addView(scrim,new FrameLayout.LayoutParams(-1,-1));
         drawer=buildDrawer();drawer.setVisibility(View.GONE);int drawerWidth=Math.min(dp(330),(int)(getResources().getDisplayMetrics().widthPixels*0.88f));root.addView(drawer,new FrameLayout.LayoutParams(drawerWidth,-1,Gravity.START));
@@ -121,7 +123,7 @@ public class MainActivity extends Activity {
         Button cancel=actionButton("✕ Sesli sohbeti kapat",Color.rgb(26,38,58));cancel.setOnClickListener(v->{if(recognizer!=null)recognizer.cancel();hideListening();});LinearLayout.LayoutParams cl=new LinearLayout.LayoutParams(-1,dp(54));cl.setMargins(0,dp(10),0,0);column.addView(cancel,cl);return overlay;
     }
 
-    private ImageView mascot(){ImageView v=new ImageView(this);try{v.setImageBitmap(BitmapFactory.decodeResource(getResources(),R.drawable.lakdoz_mascot));}catch(Exception e){v.setImageResource(R.drawable.lakdoz_mascot);}v.setScaleType(ImageView.ScaleType.CENTER_CROP);v.setAdjustViewBounds(true);v.setBackground(rounded(Color.rgb(28,42,67),18));v.setPadding(dp(2),dp(2),dp(2),dp(2));return v;}
+    private ImageView mascot(){ImageView v=new ImageView(this);try{v.setImageBitmap(BitmapFactory.decodeResource(getResources(),R.drawable.lakdoz_mascot));}catch(Exception e){v.setImageResource(R.drawable.lakdoz_mascot);}v.setScaleType(ImageView.ScaleType.CENTER_CROP);v.setAdjustViewBounds(true);GradientDrawable circle=new GradientDrawable();circle.setShape(GradientDrawable.OVAL);circle.setColor(Color.rgb(28,42,67));v.setBackground(circle);v.setClipToOutline(true);v.setPadding(0,0,0,0);return v;}
     private void showListening(){listenTitle.setText("Dinliyorum…");listenPartial.setText("Seni dinliyorum…");listenCaption.setText("Canlı sohbet aktif");soundToggle.setText(settings.isSoundEnabled()?"🔊 Ses açık":"🔇 Ses kapalı");repeatListen.setText(settings.isContinuousVoice()?"♾ Sürekli açık":"🎙 Tekrar dinle");listeningOverlay.setVisibility(View.VISIBLE);listeningOverlay.bringToFront();if(listenScroll!=null)listenScroll.scrollTo(0,0);}
     private void hideListening(){listeningOverlay.setVisibility(View.GONE);if(pulseRing!=null){pulseRing.setScaleX(1f);pulseRing.setScaleY(1f);}}
     private void toggleSound(){boolean on=!settings.isSoundEnabled();settings.setSoundEnabled(on);soundToggle.setText(on?"🔊 Ses açık":"🔇 Ses kapalı");if(!on&&systemTts!=null)systemTts.stop();}
@@ -141,7 +143,7 @@ public class MainActivity extends Activity {
 
     private void consumeSpeechDelta(String delta,boolean flush){String ready=null;synchronized(speechLock){speechBuffer.append(delta);int cut=findSpeechCut(speechBuffer);if(flush&&speechBuffer.length()>0)cut=speechBuffer.length();if(cut>0){ready=speechBuffer.substring(0,cut).trim();speechBuffer.delete(0,cut);}}if(ready!=null&&!ready.isEmpty())queueVoiceChunk(ready);}
     private int findSpeechCut(StringBuilder b){if(b.length()<18)return 0;int max=Math.min(b.length(),88);for(int i=18;i<max;i++){char c=b.charAt(i);if(c=='.'||c=='!'||c=='?'||c=='\n')return i+1;}return b.length()>=44?44:0;}
-    private void queueVoiceChunk(String text){if(text==null||text.trim().isEmpty()||!settings.isSoundEnabled())return;final String chunk=text.trim();if(!settings.useGeminiVoice()){runOnUiThread(()->speakSystemQueued(chunk));return;}voiceExecutor.execute(()->{if(!settings.isSoundEnabled())return;try{new GeminiTtsClient(getApplicationContext()).speak(chunk);}catch(Exception e){if(settings.isSoundEnabled())runOnUiThread(()->speakSystemQueued(chunk));}});}
+    private void queueVoiceChunk(String text){if(text==null||text.trim().isEmpty()||!settings.isSoundEnabled())return;final String chunk=text.trim();if(!settings.useGeminiVoice()){runOnUiThread(()->speakSystemQueued(chunk));return;}voiceExecutor.execute(()->{if(!settings.isSoundEnabled())return;GeminiTtsClient tts=new GeminiTtsClient(getApplicationContext());try{tts.speak(chunk);}catch(Exception first){try{Thread.sleep(320);if(settings.isSoundEnabled())tts.speak(chunk);}catch(Exception second){runOnUiThread(()->{if(listeningOverlay!=null&&listeningOverlay.getVisibility()==View.VISIBLE)listenCaption.setText("Seçili ses geçici olarak kullanılamıyor");});}}});}
     private void queueAutoRelisten(){voiceExecutor.execute(()->{try{Thread.sleep(180);}catch(Exception ignored){}runOnUiThread(()->{if(listeningOverlay!=null&&listeningOverlay.getVisibility()==View.VISIBLE&&settings.isContinuousVoice()){listenTitle.setText("Dinliyorum…");listenPartial.setText("Seni dinliyorum…");listenCaption.setText("Konuşabilirsin");startRecognizerOnly();}});});}
     private String friendlyError(Exception e){String m=e.getMessage()==null?"":e.getMessage();if(m.toLowerCase().contains("timeout")||m.toLowerCase().contains("timed out"))return"Bağlantı zaman aşımına uğradı. Tekrar dene.";if(m.contains("HTTP 503"))return"Lakdoz AI şu anda yoğun. Biraz sonra tekrar dene.";if(m.contains("HTTP 429"))return"Lakdoz AI kullanım sınırına ulaşıldı. Bir süre sonra tekrar dene.";return"Bağlantı başarısız: "+(m.isEmpty()?"Lakdoz AI servisine ulaşılamadı.":m);}
 
@@ -165,7 +167,7 @@ public class MainActivity extends Activity {
     private GradientDrawable rounded(int color,int radius){GradientDrawable g=new GradientDrawable();g.setColor(color);g.setCornerRadius(dp(radius));return g;}
     private int dp(int n){return(int)(n*getResources().getDisplayMetrics().density);}
     private void scrollBottom(){if(messageScroll!=null)messageScroll.post(()->messageScroll.fullScroll(View.FOCUS_DOWN));}
-    private void applyInsets(){View content=findViewById(android.R.id.content);if(content==null)return;content.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets b=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());v.setPadding(b.left,b.top,b.right,b.bottom);return insets;});}
+    private void applyInsets(){View content=findViewById(android.R.id.content);if(content==null)return;content.setOnApplyWindowInsetsListener((v,insets)->{if(Build.VERSION.SDK_INT>=30){android.graphics.Insets bars=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());android.graphics.Insets ime=insets.getInsets(WindowInsets.Type.ime());int bottom=Math.max(bars.bottom,ime.bottom);v.setPadding(bars.left,bars.top,bars.right,bottom);}return insets;});content.requestApplyInsets();}
     @Override public void onBackPressed(){if(listeningOverlay!=null&&listeningOverlay.getVisibility()==View.VISIBLE){if(recognizer!=null)recognizer.cancel();hideListening();return;}if(drawer!=null&&drawer.getVisibility()==View.VISIBLE){closeDrawer();return;}super.onBackPressed();}
     @Override protected void onDestroy(){if(recognizer!=null)recognizer.destroy();if(systemTts!=null)systemTts.shutdown();executor.shutdownNow();voiceExecutor.shutdownNow();super.onDestroy();}
 }

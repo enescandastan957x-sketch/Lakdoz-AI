@@ -18,6 +18,10 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 public class OpenRouterClient {
+    private static final long MODEL_CACHE_MS=6L*60L*60L*1000L;
+    private static volatile long modelCacheAt=0L;
+    private static volatile String modelCacheKey="";
+    private static volatile ArrayList<String> modelCache=new ArrayList<>();
     private final SecureSettings settings;
     public OpenRouterClient(Context context){ settings=new SecureSettings(context); }
 
@@ -63,6 +67,9 @@ public class OpenRouterClient {
     }
 
     private List<String> discoverFreeModels(String key)throws Exception {
+        String marker=key.length()+":"+(key.length()>4?key.substring(0,4):key);
+        long now=System.currentTimeMillis();
+        if(marker.equals(modelCacheKey)&&now-modelCacheAt<MODEL_CACHE_MS&&!modelCache.isEmpty())return new ArrayList<>(modelCache);
         HttpURLConnection c=(HttpURLConnection)new URL("https://openrouter.ai/api/v1/models").openConnection();
         c.setRequestMethod("GET");c.setConnectTimeout(7000);c.setReadTimeout(12000);
         c.setRequestProperty("Authorization","Bearer "+key.trim());
@@ -78,10 +85,13 @@ public class OpenRouterClient {
             JSONObject pricing=model.optJSONObject("pricing");
             String promptPrice=pricing==null?"":pricing.optString("prompt","");
             String completionPrice=pricing==null?"":pricing.optString("completion","");
+            String lower=id.toLowerCase(java.util.Locale.ROOT);
             if(id.isEmpty()||id.equals("openrouter/free"))continue;
+            if(lower.contains("embedding")||lower.contains("embed")||lower.contains("whisper")||lower.contains("tts")||lower.contains("audio")||lower.contains("image"))continue;
             if(!isZeroPrice(promptPrice)||!isZeroPrice(completionPrice))continue;
-            out.add(id);
+            if(!out.contains(id))out.add(id);
         }
+        if(!out.isEmpty()){modelCacheKey=marker;modelCacheAt=now;modelCache=new ArrayList<>(out);}
         return out;
     }
 

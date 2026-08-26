@@ -23,6 +23,11 @@ public class SecureSettings {
     public void setGeminiApiKey(String value) throws Exception { saveEncrypted("gemini_key", value); }
     public String getGeminiApiKey() { return loadEncrypted("gemini_key"); }
     public void clearGeminiApiKey() { prefs.edit().remove("gemini_key_ct").remove("gemini_key_iv").apply(); }
+    public void setOpenRouterApiKey(String value) throws Exception { saveEncrypted("openrouter_key", value); }
+    public String getOpenRouterApiKey() { return loadEncrypted("openrouter_key"); }
+    public void clearOpenRouterApiKey() { prefs.edit().remove("openrouter_key_ct").remove("openrouter_key_iv").apply(); }
+    public void setSmartEnsemble(boolean enabled) { prefs.edit().putBoolean("smart_ensemble", enabled).apply(); }
+    public boolean isSmartEnsemble() { return prefs.getBoolean("smart_ensemble", true); }
 
     public void setGeminiModel(String model) { prefs.edit().putString("gemini_model", model == null ? "" : model.trim()).apply(); }
     public String getGeminiModel() {

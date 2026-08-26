@@ -24,13 +24,13 @@ public class GeminiTtsClient {
     public void speak(String text, String voice, String style) throws Exception {
         if (text == null || text.trim().isEmpty()) return;
         String key = settings.getGeminiApiKey();
-        if (key == null || key.trim().isEmpty()) throw new IllegalStateException("Gemini API anahtarı yok.");
+        if (key == null || key.trim().isEmpty()) throw new IllegalStateException("Lakdoz AI bağlantı anahtarı yok.");
         Exception last = null;
         for (String model : MODELS) {
             try { play(synthesize(key.trim(), model, voice, style, text.trim())); return; }
             catch (Exception e) { last = e; String m=e.getMessage()==null?"":e.getMessage(); if(!m.contains("HTTP 404")&&!m.contains("HTTP 429")&&!m.contains("HTTP 503")) throw e; }
         }
-        throw last == null ? new IllegalStateException("Gemini ses modeli bulunamadı.") : last;
+        throw last == null ? new IllegalStateException("Lakdoz AI ses modeli bulunamadı.") : last;
     }
 
     private AudioData synthesize(String key, String model, String voice, String style, String text) throws Exception {
@@ -50,15 +50,15 @@ public class GeminiTtsClient {
         c.setRequestMethod("POST"); c.setConnectTimeout(10000); c.setReadTimeout(45000); c.setDoOutput(true); c.setRequestProperty("Content-Type","application/json; charset=utf-8");
         byte[] request=body.toString().getBytes(StandardCharsets.UTF_8); c.setFixedLengthStreamingMode(request.length); c.getOutputStream().write(request); c.getOutputStream().close();
         int code=c.getResponseCode(); String raw=readAll(code>=200&&code<300?c.getInputStream():c.getErrorStream());
-        if(code<200||code>=300){String message=raw;try{JSONObject error=new JSONObject(raw).optJSONObject("error");if(error!=null)message=error.optString("message",raw);}catch(Exception ignored){}throw new IllegalStateException("Gemini ses servisi HTTP "+code+": "+message);}
+        if(code<200||code>=300){String message=raw;try{JSONObject error=new JSONObject(raw).optJSONObject("error");if(error!=null)message=error.optString("message",raw);}catch(Exception ignored){}throw new IllegalStateException("Lakdoz AI ses servisi HTTP "+code+": "+message);}
         JSONObject root=new JSONObject(raw); JSONArray candidates=root.optJSONArray("candidates");
-        if(candidates==null||candidates.length()==0)throw new IllegalStateException("Gemini ses adayı döndürmedi.");
-        JSONObject first=candidates.optJSONObject(0); if(first==null)throw new IllegalStateException("Gemini ses adayı boş.");
-        JSONObject content=first.optJSONObject("content"); if(content==null)throw new IllegalStateException("Gemini ses içeriği yok.");
-        JSONArray parts=content.optJSONArray("parts"); if(parts==null)throw new IllegalStateException("Gemini ses parçası yok.");
+        if(candidates==null||candidates.length()==0)throw new IllegalStateException("Lakdoz AI ses adayı döndürmedi.");
+        JSONObject first=candidates.optJSONObject(0); if(first==null)throw new IllegalStateException("Lakdoz AI ses adayı boş.");
+        JSONObject content=first.optJSONObject("content"); if(content==null)throw new IllegalStateException("Lakdoz AI ses içeriği yok.");
+        JSONArray parts=content.optJSONArray("parts"); if(parts==null)throw new IllegalStateException("Lakdoz AI ses parçası yok.");
         JSONObject inline=null; for(int i=0;i<parts.length();i++){JSONObject p=parts.optJSONObject(i);if(p!=null&&p.optJSONObject("inlineData")!=null){inline=p.optJSONObject("inlineData");break;}}
-        if(inline==null)throw new IllegalStateException("Gemini ses verisi döndürmedi.");
-        String data=inline.optString("data",""); if(data.isEmpty())throw new IllegalStateException("Gemini ses verisi boş.");
+        if(inline==null)throw new IllegalStateException("Lakdoz AI ses verisi döndürmedi.");
+        String data=inline.optString("data",""); if(data.isEmpty())throw new IllegalStateException("Lakdoz AI ses verisi boş.");
         String mime=inline.optString("mimeType","audio/L16;codec=pcm;rate=24000"); int sampleRate=parseRate(mime); return new AudioData(Base64.decode(data,Base64.DEFAULT),sampleRate,1,mime);
     }
 
@@ -69,3 +69,4 @@ public class GeminiTtsClient {
     private String readAll(InputStream is)throws Exception{if(is==null)return"";BufferedReader br=new BufferedReader(new InputStreamReader(is,StandardCharsets.UTF_8));StringBuilder sb=new StringBuilder();String line;while((line=br.readLine())!=null)sb.append(line);br.close();return sb.toString();}
     private static final class AudioData{final byte[] bytes;final int sampleRate;final int channels;final String mime;AudioData(byte[] b,int r,int c,String m){bytes=b;sampleRate=r;channels=c;mime=m==null?"":m;}}
 }
+

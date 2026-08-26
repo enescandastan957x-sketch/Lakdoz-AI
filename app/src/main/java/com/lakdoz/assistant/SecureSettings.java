@@ -20,34 +20,24 @@ public class SecureSettings {
         prefs = context.getSharedPreferences("lakdoz_secure", Context.MODE_PRIVATE);
     }
 
-    public void setGeminiApiKey(String value) throws Exception {
-        saveEncrypted("gemini_key", value);
-    }
-
-    public String getGeminiApiKey() {
-        return loadEncrypted("gemini_key");
-    }
-
-    public void clearGeminiApiKey() {
-        prefs.edit().remove("gemini_key_ct").remove("gemini_key_iv").apply();
-    }
+    public void setGeminiApiKey(String value) throws Exception { saveEncrypted("gemini_key", value); }
+    public String getGeminiApiKey() { return loadEncrypted("gemini_key"); }
+    public void clearGeminiApiKey() { prefs.edit().remove("gemini_key_ct").remove("gemini_key_iv").apply(); }
 
     public void setGeminiModel(String model) {
         prefs.edit().putString("gemini_model", model == null ? "" : model.trim()).apply();
     }
 
     public String getGeminiModel() {
-        String model = prefs.getString("gemini_model", "gemini-2.5-flash");
-        return model == null || model.trim().isEmpty() ? "gemini-2.5-flash" : model.trim();
+        String model = prefs.getString("gemini_model", "gemini-flash-latest");
+        if (model == null || model.trim().isEmpty() || "gemini-2.5-flash".equals(model.trim())) {
+            return "gemini-flash-latest";
+        }
+        return model.trim();
     }
 
-    public void setBackendUrl(String url) {
-        prefs.edit().putString("backend", url == null ? "" : url.trim()).apply();
-    }
-
-    public String getBackendUrl() {
-        return prefs.getString("backend", "");
-    }
+    public void setBackendUrl(String url) { prefs.edit().putString("backend", url == null ? "" : url.trim()).apply(); }
+    public String getBackendUrl() { return prefs.getString("backend", ""); }
 
     private void saveEncrypted(String prefix, String value) throws Exception {
         if (value == null || value.trim().isEmpty()) {
@@ -58,10 +48,8 @@ public class SecureSettings {
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.ENCRYPT_MODE, key);
         byte[] ct = cipher.doFinal(value.trim().getBytes(StandardCharsets.UTF_8));
-        prefs.edit()
-                .putString(prefix + "_ct", Base64.encodeToString(ct, Base64.NO_WRAP))
-                .putString(prefix + "_iv", Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP))
-                .apply();
+        prefs.edit().putString(prefix + "_ct", Base64.encodeToString(ct, Base64.NO_WRAP))
+                .putString(prefix + "_iv", Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP)).apply();
     }
 
     private String loadEncrypted(String prefix) {
@@ -74,13 +62,10 @@ public class SecureSettings {
             SecretKey key = (SecretKey) ks.getKey(ALIAS, null);
             if (key == null) return "";
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, key,
-                    new GCMParameterSpec(128, Base64.decode(ivS, Base64.NO_WRAP)));
+            cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(128, Base64.decode(ivS, Base64.NO_WRAP)));
             byte[] pt = cipher.doFinal(Base64.decode(ctS, Base64.NO_WRAP));
             return new String(pt, StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return "";
-        }
+        } catch (Exception e) { return ""; }
     }
 
     private SecretKey getOrCreateKey() throws Exception {
@@ -89,11 +74,9 @@ public class SecureSettings {
         SecretKey existing = (SecretKey) ks.getKey(ALIAS, null);
         if (existing != null) return existing;
         KeyGenerator kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
-        kg.init(new KeyGenParameterSpec.Builder(ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+        kg.init(new KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .build());
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build());
         return kg.generateKey();
     }
 }

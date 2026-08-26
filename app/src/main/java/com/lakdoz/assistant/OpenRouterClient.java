@@ -50,6 +50,9 @@ public class OpenRouterClient {
             }catch(Exception ignored){}
         }
         pool.shutdownNow();
+        if(answers.isEmpty()&&!models.contains("openrouter/free")){
+            try{answers.add(askWithModel(key,"openrouter/free",prompt,history,memory));}catch(Exception ignored){}
+        }
         return answers;
     }
 
@@ -78,8 +81,7 @@ public class OpenRouterClient {
 
     private boolean isZeroPrice(String price){
         if(price==null)return false;
-        String p=price.trim();
-        return p.equals("0")||p.equals("0.0")||p.equals("0.000000")||p.equals("0e0")||p.equals("0E0");
+        try{return Double.parseDouble(price.trim())==0.0d;}catch(Exception ignored){return false;}
     }
 
     private String askWithModel(String key,String model,String prompt,List<HistoryStore.Turn> history,String memory)throws Exception {

@@ -21,5 +21,5 @@ jobs:
         run: gradle :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: Lakdoz-AI-0.8-Gemini
+          name: Lakdoz-AI-0.9-Voices
           path: app/build/outputs/apk/debug/app-debug.apk

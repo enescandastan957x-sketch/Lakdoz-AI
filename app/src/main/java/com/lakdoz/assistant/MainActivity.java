@@ -143,7 +143,15 @@ public class MainActivity extends Activity {
 
     private String smartInterpret(String raw,List<HistoryStore.Turn> before,String memory){
         try{
-            String instruction="Rewrite the user's intended message in natural Turkish. Correct likely typos and missing letters. Preserve the recent conversation topic, person, place, product and time when this is a follow-up. Do not invent a new entity. Return only the rewritten message. Input: "+raw;
+            String instruction="Sen Lakdoz'ın Türkçe niyet ve yazım düzeltme katmanısın. Kullanıcı sıkça harf atlayabilir, yanlış tuşa basabilir, konuştuğu gibi yazabilir veya kelimeleri sesletildiği biçimde yazabilir. "
+                    +"Mesajı cevaplama; yalnızca kullanıcının anlatmak istediği cümleyi doğal Türkçe ile yeniden yaz. "
+                    +"Cümle zaten anlaşılırsa anlamını değiştirmeden mümkün olduğunca aynı bırak. "
+                    +"Takip mesajlarında önceki konuşmadaki kişi, şehir, ürün, konu ve zamanı koru; yeni varlık uydurma. "
+                    +"Soru türünü koru (örneğin hava sorusunu genel bilgi sorusuna çevirme). "
+                    +"Belirsizlik çözülemiyorsa tahmin ekleme, orijinal cümleyi döndür. "
+                    +"Örnek: 'ortalama 2 saatte yağmur var mu' -> 'Önümüzdeki 2 saatte yağmur var mı?'. "
+                    +"Örnek: 'haur palma için soruyorum' ifadesindeki 'haur' kelimesini önceki hava bağlamıyla ilişkilendir, Palma yer bilgisini koru. "
+                    +"Yalnızca düzeltilmiş cümleyi döndür. Girdi: "+raw;
             String out=new AiClient(getApplicationContext()).askStreaming(instruction,before,memory,null);
             if(out==null)return raw;
             out=out.trim();

@@ -29,12 +29,16 @@ public class SecureSettings {
     }
 
     public String getGeminiModel() {
-        String model = prefs.getString("gemini_model", "gemini-flash-latest");
-        if (model == null || model.trim().isEmpty() || "gemini-2.5-flash".equals(model.trim())) {
-            return "gemini-flash-latest";
-        }
-        return model.trim();
+        String model = prefs.getString("gemini_model", "gemini-2.5-flash");
+        return model == null || model.trim().isEmpty() ? "gemini-2.5-flash" : model.trim();
     }
+
+    public void setVoiceName(String name) { prefs.edit().putString("voice_name", name == null ? "" : name).apply(); }
+    public String getVoiceName() { return prefs.getString("voice_name", ""); }
+    public void setSpeechRate(float value) { prefs.edit().putFloat("speech_rate", value).apply(); }
+    public float getSpeechRate() { return prefs.getFloat("speech_rate", 1.0f); }
+    public void setSpeechPitch(float value) { prefs.edit().putFloat("speech_pitch", value).apply(); }
+    public float getSpeechPitch() { return prefs.getFloat("speech_pitch", 1.0f); }
 
     public void setBackendUrl(String url) { prefs.edit().putString("backend", url == null ? "" : url.trim()).apply(); }
     public String getBackendUrl() { return prefs.getString("backend", ""); }

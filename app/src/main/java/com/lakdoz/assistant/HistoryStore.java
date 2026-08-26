@@ -71,31 +71,62 @@ public class HistoryStore {
         }
         String clean = text.trim();
         target.turns.add(new Turn(role, clean));
-        while (target.turns.size() > 120) target.turns.remove(0);
+        while (target.turns.size() > 160) target.turns.remove(0);
         if ("user".equals(role) && (target.title == null || target.title.isEmpty() || "Yeni sohbet".equals(target.title))) target.title = makeTitle(clean);
         target.updatedAt = System.currentTimeMillis();
         writeThreads(threads);
     }
 
     public synchronized String buildRelevantMemory(String query, int maxChars) {
-        if (query == null || query.trim().isEmpty()) return "";
-        Set<String> tokens = tokenize(query);
+        ArrayList<ThreadData> threads = readThreads();
+        if (threads.isEmpty()) return "";
         String active = getActiveConversationId();
-        ArrayList<MemoryHit> hits = new ArrayList<>();
-        long now = System.currentTimeMillis();
-        for (ThreadData t : readThreads()) {
-            for (int i = 0; i < t.turns.size(); i++) {
+        Set<String> qTokens = tokenize(query == null ? "" : query);
+        boolean explicitMemory = containsMemoryCue(query == null ? "" : query);
+        int limit = Math.max(900, maxChars);
+        StringBuilder out = new StringBuilder();
+        HashSet<String> seen = new HashSet<>();
+
+        // 1) Always include a compact snapshot of the most recent OTHER chats.
+        ArrayList<ThreadData> recent = new ArrayList<>(threads);
+        Collections.sort(recent, (a,b) -> Long.compare(b.updatedAt, a.updatedAt));
+        int recentThreads = 0;
+        for (ThreadData t : recent) {
+            if (t.id.equals(active) || t.turns.isEmpty()) continue;
+            StringBuilder line = new StringBuilder();
+            line.append("[").append(safeTitle(t.title)).append("] ");
+            int start = Math.max(0, t.turns.size() - (explicitMemory ? 4 : 2));
+            for (int i = start; i < t.turns.size(); i++) {
                 Turn turn = t.turns.get(i);
                 if (turn.text == null || turn.text.trim().isEmpty()) continue;
-                int overlap = overlap(tokens, tokenize(turn.text));
-                boolean sameThread = t.id.equals(active);
-                if (overlap == 0 && !containsMemoryCue(query)) continue;
-                int score = overlap * 12;
-                if (!sameThread) score += 4;
-                long ageDays = Math.max(0, (now - t.updatedAt) / 86400000L);
-                score += Math.max(0, 8 - (int)Math.min(8, ageDays));
                 String who = "user".equals(turn.role) ? "Kullanıcı" : "Lakdoz";
-                String text = "[" + safeTitle(t.title) + "] " + who + ": " + turn.text.replace('\n',' ');
+                line.append(who).append(": ").append(shorten(turn.text, 260)).append(" | ");
+            }
+            String s = line.toString().trim();
+            if (!s.isEmpty() && !seen.contains(s)) {
+                if (out.length() + s.length() + 1 > limit) break;
+                out.append(s).append('\n');
+                seen.add(s);
+                recentThreads++;
+            }
+            if (recentThreads >= (explicitMemory ? 5 : 3)) break;
+        }
+
+        // 2) Add semantically relevant token-overlap hits from ALL chats.
+        ArrayList<MemoryHit> hits = new ArrayList<>();
+        long now = System.currentTimeMillis();
+        for (ThreadData t : threads) {
+            for (Turn turn : t.turns) {
+                if (turn.text == null || turn.text.trim().isEmpty()) continue;
+                int overlap = overlap(qTokens, tokenize(turn.text));
+                if (overlap == 0 && !explicitMemory) continue;
+                int score = overlap * 20;
+                if (!t.id.equals(active)) score += 10;
+                long ageDays = Math.max(0, (now - t.updatedAt) / 86400000L);
+                score += Math.max(0, 12 - (int)Math.min(12, ageDays));
+                if (explicitMemory) score += 6;
+                String who = "user".equals(turn.role) ? "Kullanıcı" : "Lakdoz";
+                String text = "[" + safeTitle(t.title) + "] " + who + ": " + shorten(turn.text.replace('\n',' '), 360);
                 hits.add(new MemoryHit(text, score, t.updatedAt));
             }
         }
@@ -103,22 +134,22 @@ public class HistoryStore {
             int s = Integer.compare(b.score, a.score);
             return s != 0 ? s : Long.compare(b.updated, a.updated);
         });
-        StringBuilder out = new StringBuilder();
-        int limit = Math.max(400, maxChars);
-        int used = 0;
         for (MemoryHit h : hits) {
-            String line = h.text;
-            if (line.length() > 420) line = line.substring(0, 420) + "…";
-            if (used + line.length() + 1 > limit) break;
-            out.append(line).append('\n'); used += line.length() + 1;
-            if (used > limit * 0.9) break;
+            if (seen.contains(h.text)) continue;
+            if (out.length() + h.text.length() + 1 > limit) break;
+            out.append(h.text).append('\n');
+            seen.add(h.text);
         }
         return out.toString().trim();
     }
 
+    public synchronized int conversationCount() { return readThreads().size(); }
+
     private boolean containsMemoryCue(String q) {
         String s = q.toLowerCase(new Locale("tr","TR"));
-        return s.contains("hatırla") || s.contains("hatırlıyor") || s.contains("geçen") || s.contains("önceki") || s.contains("eski sohbet") || s.contains("konuşmuştuk") || s.contains("daha önce");
+        return s.contains("hatırla") || s.contains("hatırlıyor") || s.contains("geçen") || s.contains("önceki") ||
+                s.contains("eski sohbet") || s.contains("konuşmuştuk") || s.contains("daha önce") ||
+                s.contains("en son") || s.contains("kaldığımız") || s.contains("devam et");
     }
 
     private Set<String> tokenize(String text) {
@@ -126,17 +157,18 @@ public class HistoryStore {
         String norm = text.toLowerCase(new Locale("tr","TR")).replaceAll("[^a-z0-9çğıöşü]+", " ");
         for (String p : norm.split("\\s+")) {
             if (p.length() < 3) continue;
-            if (p.equals("ve") || p.equals("bir") || p.equals("ile") || p.equals("için") || p.equals("ama") || p.equals("gibi") || p.equals("daha")) continue;
+            if (p.equals("ve") || p.equals("bir") || p.equals("ile") || p.equals("için") || p.equals("ama") || p.equals("gibi") || p.equals("daha") || p.equals("bana")) continue;
             out.add(p);
         }
         return out;
     }
 
     private int overlap(Set<String> a, Set<String> b) { int n=0; for (String x:a) if (b.contains(x)) n++; return n; }
+    private String shorten(String s, int max) { if (s == null) return ""; s=s.trim(); return s.length() <= max ? s : s.substring(0,max).trim()+"…"; }
 
     public synchronized String newConversation() {
         ArrayList<ThreadData> threads = readThreads(); ThreadData t = newThread(); threads.add(t);
-        while (threads.size() > 60) { Collections.sort(threads, Comparator.comparingLong(a -> a.updatedAt)); threads.remove(0); }
+        while (threads.size() > 80) { Collections.sort(threads, Comparator.comparingLong(a -> a.updatedAt)); threads.remove(0); }
         writeThreads(threads); prefs.edit().putString(ACTIVE_KEY, t.id).apply(); return t.id;
     }
 

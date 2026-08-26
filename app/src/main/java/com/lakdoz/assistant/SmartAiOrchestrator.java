@@ -37,8 +37,13 @@ public class SmartAiOrchestrator {
         if(elapsedMs<4500L)try{Thread.sleep(4500L-elapsedMs);}catch(InterruptedException ignored){Thread.currentThread().interrupt();}
 
         if(a.isEmpty()&&freeAnswers.isEmpty())return new AiClient(context).askStreaming(prompt,history,memory,listener);
-        if(a.isEmpty()&&freeAnswers.size()==1){if(listener!=null)listener.onDelta(freeAnswers.get(0));return freeAnswers.get(0);}
-        if(a.isEmpty()){a=freeAnswers.remove(0);}
+        if(a.isEmpty()){
+            // Gemini kullanılamıyorsa ücretsiz adaylardan en iyi ilk cevabı güvenli
+            // geri dönüş olarak göster; sentez için ikinci bir Gemini çağrısına güvenme.
+            String fallback=freeAnswers.get(0);
+            if(listener!=null)listener.onDelta(fallback);
+            return fallback;
+        }
         if(freeAnswers.isEmpty()){if(listener!=null)listener.onDelta(a);return a;}
 
         StringBuilder synthesis=new StringBuilder();

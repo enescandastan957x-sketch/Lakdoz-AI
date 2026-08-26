@@ -37,8 +37,8 @@ public class SecureSettings {
     }
 
     public String getGeminiModel() {
-        String model = prefs.getString("gemini_model", "gemini-3.7-flash");
-        return model == null || model.trim().isEmpty() ? "gemini-3.7-flash" : model.trim();
+        String model = prefs.getString("gemini_model", "gemini-2.5-flash");
+        return model == null || model.trim().isEmpty() ? "gemini-2.5-flash" : model.trim();
     }
 
     public void setBackendUrl(String url) {

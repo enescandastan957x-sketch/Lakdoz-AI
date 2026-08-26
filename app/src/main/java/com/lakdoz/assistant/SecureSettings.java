@@ -24,13 +24,10 @@ public class SecureSettings {
     public String getGeminiApiKey() { return loadEncrypted("gemini_key"); }
     public void clearGeminiApiKey() { prefs.edit().remove("gemini_key_ct").remove("gemini_key_iv").apply(); }
 
-    public void setGeminiModel(String model) {
-        prefs.edit().putString("gemini_model", model == null ? "" : model.trim()).apply();
-    }
-
+    public void setGeminiModel(String model) { prefs.edit().putString("gemini_model", model == null ? "" : model.trim()).apply(); }
     public String getGeminiModel() {
-        String model = prefs.getString("gemini_model", "gemini-2.5-flash");
-        return model == null || model.trim().isEmpty() ? "gemini-2.5-flash" : model.trim();
+        String model = prefs.getString("gemini_model", "");
+        return model == null ? "" : model.trim();
     }
 
     public void setUseGeminiVoice(boolean enabled) { prefs.edit().putBoolean("use_gemini_voice", enabled).apply(); }
@@ -43,15 +40,15 @@ public class SecureSettings {
     public void setGeminiVoiceStyle(String style) { prefs.edit().putString("gemini_voice_style", style == null ? "" : style).apply(); }
     public String getGeminiVoiceStyle() { return prefs.getString("gemini_voice_style", "Doğal, sıcak ve akıcı bir Türkçe ile konuş."); }
 
+    public void setSoundEnabled(boolean enabled) { prefs.edit().putBoolean("sound_enabled", enabled).apply(); }
+    public boolean isSoundEnabled() { return prefs.getBoolean("sound_enabled", true); }
+
     public void setVoiceName(String name) { prefs.edit().putString("voice_name", name == null ? "" : name).apply(); }
     public String getVoiceName() { return prefs.getString("voice_name", ""); }
     public void setSpeechRate(float value) { prefs.edit().putFloat("speech_rate", value).apply(); }
-    public float getSpeechRate() { return prefs.getFloat("speech_rate", 1.0f); }
+    public float getSpeechRate() { return prefs.getFloat("speech_rate", 1.03f); }
     public void setSpeechPitch(float value) { prefs.edit().putFloat("speech_pitch", value).apply(); }
     public float getSpeechPitch() { return prefs.getFloat("speech_pitch", 1.0f); }
-
-    public void setBackendUrl(String url) { prefs.edit().putString("backend", url == null ? "" : url.trim()).apply(); }
-    public String getBackendUrl() { return prefs.getString("backend", ""); }
 
     private void saveEncrypted(String prefix, String value) throws Exception {
         if (value == null || value.trim().isEmpty()) {

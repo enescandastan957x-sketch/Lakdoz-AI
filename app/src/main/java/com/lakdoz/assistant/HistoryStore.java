@@ -255,6 +255,14 @@ public class HistoryStore {
         writeThreads(threads);
     }
 
+    public synchronized void clearAll() {
+        ArrayList<ThreadData> threads = new ArrayList<>();
+        ThreadData fresh = newThread();
+        threads.add(fresh);
+        writeThreads(threads);
+        prefs.edit().putString(ACTIVE_KEY, fresh.id).apply();
+    }
+
     public synchronized void deleteActiveConversation() {
         ArrayList<ThreadData> threads=readThreads(); String active=getActiveConversationId();
         for(int i=threads.size()-1;i>=0;i--) if(threads.get(i).id.equals(active)) threads.remove(i);
@@ -284,3 +292,4 @@ public class HistoryStore {
     private String makeTitle(String text){String s=text==null?"":text.replace('\n',' ').trim();if(s.length()>34)s=s.substring(0,34).trim()+"…";return s.isEmpty()?"Yeni sohbet":s;}
     private String safeTitle(String title){return title==null||title.trim().isEmpty()?"Yeni sohbet":title.trim();}
 }
+

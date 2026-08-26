@@ -31,11 +31,17 @@ public class OpenRouterClient {
 
     /** Ücretsiz modelleri mümkün olduğunca dinamik keşfeder ve birkaçını paralel sorgular. */
     public List<String> askFreeCandidates(String prompt,List<HistoryStore.Turn> history,String memory)throws Exception {
+        return askFreeCandidates(prompt,history,memory,3);
+    }
+
+    public List<String> askFreeCandidates(String prompt,List<HistoryStore.Turn> history,String memory,int maxCandidates)throws Exception {
         String key=settings.getOpenRouterApiKey();
         if(key==null||key.trim().isEmpty())throw new IllegalStateException("OpenRouter bağlantısı ayarlı değil.");
+        int limit=Math.max(1,Math.min(3,maxCandidates));
         List<String> models=discoverFreeModels(key);
+        if(models.size()>limit)models=new ArrayList<>(models.subList(0,limit));
         if(models.isEmpty())models.add("openrouter/free");
-        ExecutorService pool=Executors.newFixedThreadPool(Math.min(3,models.size()));
+        ExecutorService pool=Executors.newFixedThreadPool(Math.min(limit,models.size()));
         ArrayList<Future<String>> jobs=new ArrayList<>();
         for(String model:models){
             jobs.add(pool.submit(new Callable<String>(){public String call()throws Exception{

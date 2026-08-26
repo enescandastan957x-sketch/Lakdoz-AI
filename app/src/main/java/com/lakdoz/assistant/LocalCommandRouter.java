@@ -10,6 +10,9 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.List;
+import java.util.ArrayList;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -39,7 +42,7 @@ public class LocalCommandRouter {
         if (isWeatherRequest(raw, history)) {
             String place = extractWeatherPlace(raw, history);
             if (!place.isEmpty()) {
-                try { return Result.yes(fetchWeather(place)); }
+                try { return Result.yes(fetchWeather(place, extractHoursAhead(raw))); }
                 catch (Exception e) { return Result.yes("Şu anda canlı hava verisine ulaşamadım. Biraz sonra tekrar deneyebilirsin."); }
             }
         }
@@ -124,11 +127,13 @@ public class LocalCommandRouter {
     private boolean isWeatherRequest(String raw, List<HistoryStore.Turn> history) {
         String f = fold(raw);
         if (f.contains("hava") || f.contains("weather") || f.contains("sicaklik") || f.contains("kac derece") || f.contains("yagmur") || f.contains("ruzgar")) return true;
-        if (history != null && raw != null && raw.trim().length() <= 70) {
-            for (int i = history.size() - 1, seen = 0; i >= 0 && seen < 4; i--, seen++) {
+        boolean temporal = f.matches(".*\\b(\\d+\\s*saat\\s*sonra|bir\\s*saat\\s*sonra|sonra|aksam|gece|sabah|yarin|birazdan)\\b.*");
+        if (history != null && raw != null && raw.trim().length() <= 80) {
+            for (int i = history.size() - 1, seen = 0; i >= 0 && seen < 8; i--, seen++) {
                 HistoryStore.Turn t = history.get(i);
                 String x = fold(t.text);
-                if (x.contains("hava") || x.contains("sicaklik") || x.contains("kac derece") || x.contains("weather")) return true;
+                if ("assistant".equals(t.role) && (x.contains("icin su an") || x.contains("yagis olasiligi") || x.contains("ruzgar"))) return true;
+                if (temporal && (x.contains("hava") || x.contains("sicaklik") || x.contains("derece"))) return true;
             }
         }
         return false;
@@ -136,27 +141,74 @@ public class LocalCommandRouter {
 
     private String extractWeatherPlace(String raw, List<HistoryStore.Turn> history) {
         String s = raw == null ? "" : raw.trim();
-        String cleaned = s.replaceAll("(?iu)\\b(hava\\s*durumu|hava|kaç\\s*derece|kac\\s*derece|sıcaklık|sicaklik|bugün|bugun|yarın|yarin|nasıl|nasil|ne\\s*kadar|şu\\s*an|su\\s*an|internetten|bak|ara|öğren|ogren|göster|goster|yağmur|yagmur|var\\s*mı|var\\s*mi)\\b", " ")
+        String cleaned = s.replaceAll("(?iu)\\b(hava\\s*durumu|hava|kaç\\s*derece|kac\\s*derece|sıcaklık|sicaklik|bugün|bugun|yarın|yarin|nasıl|nasil|ne\\s*kadar|ne|şu\\s*an|su\\s*an|internetten|bak|ara|öğren|ogren|göster|goster|yağmur|yagmur|var\\s*mı|var\\s*mi|olacak|sonra|birazdan|akşam|aksam|gece|sabah|için|icin)\\b", " ")
+                .replaceAll("(?iu)\\b\\d+\\s*saat\\b", " ")
                 .replaceAll("[?!.]+", " ").replaceAll("\\s+", " ").trim();
-        if (cleaned.length() >= 2) return cleaned;
+
+        if (looksLikePlace(cleaned)) return cleaned;
+
+        String remembered = lastWeatherPlace(history);
+        if (!remembered.isEmpty()) return remembered;
+
         if (history != null) {
             for (int i = history.size() - 1; i >= 0; i--) {
                 HistoryStore.Turn t = history.get(i);
                 if (!"user".equals(t.role)) continue;
                 String candidate = t.text == null ? "" : t.text.trim();
                 String f = fold(candidate);
-                if (!f.contains("hava") && !f.contains("sicaklik") && !f.contains("kac derece") && candidate.length() >= 2 && candidate.length() <= 70) return candidate;
+                if (!f.contains("hava") && !f.contains("sicaklik") && !f.contains("kac derece") && looksLikePlace(candidate)) return candidate;
             }
         }
         return "";
     }
 
-    private String fetchWeather(String place) throws Exception {
-        String geocode = "https://geocoding-api.open-meteo.com/v1/search?name=" + URLEncoder.encode(place, "UTF-8") + "&count=1&language=tr&format=json";
-        JSONObject geo = getJson(geocode);
-        JSONArray results = geo.optJSONArray("results");
-        if (results == null || results.length() == 0) return place + " için konumu bulamadım. Şehir veya bölge adını biraz daha açık yazabilir misin?";
-        JSONObject g = results.getJSONObject(0);
+    private boolean looksLikePlace(String s) {
+        if (s == null) return false;
+        String x = s.trim();
+        if (x.length() < 2 || x.length() > 80) return false;
+        String f = fold(x);
+        if (f.matches(".*\\b(saat|sonra|olacak|nasil|neden|nedenini|bugun|yarin|gece|aksam|sabah)\\b.*")) return false;
+        return x.matches(".*[A-Za-zÇĞİÖŞÜçğıöşü].*");
+    }
+
+    private String lastWeatherPlace(List<HistoryStore.Turn> history) {
+        if (history == null) return "";
+        Pattern p1 = Pattern.compile("^(.+?)\\s+için\\s+şu\\s+an", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+        Pattern p2 = Pattern.compile("^(.+?)(?:'da|'de|'ta|'te)\\s+önümüzdeki", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+        for (int i = history.size() - 1; i >= 0; i--) {
+            HistoryStore.Turn t = history.get(i);
+            if (!"assistant".equals(t.role) || t.text == null) continue;
+            String txt = t.text.trim();
+            Matcher m = p1.matcher(txt);
+            if (m.find()) return simplifyRememberedPlace(m.group(1));
+            m = p2.matcher(txt);
+            if (m.find()) return simplifyRememberedPlace(m.group(1));
+        }
+        return "";
+    }
+
+    private String simplifyRememberedPlace(String s) {
+        if (s == null) return "";
+        String x = s.trim();
+        int comma = x.indexOf(',');
+        if (comma > 0) x = x.substring(0, comma).trim();
+        return x;
+    }
+
+    private int extractHoursAhead(String raw) {
+        String f = fold(raw);
+        Matcher m = Pattern.compile("(\\d{1,2})\\s*saat\\s*sonra").matcher(f);
+        if (m.find()) {
+            try { return Math.max(1, Math.min(48, Integer.parseInt(m.group(1)))); } catch (Exception ignored) {}
+        }
+        if (f.contains("bir saat sonra")) return 1;
+        return 0;
+    }
+
+    private String fetchWeather(String place, int hoursAhead) throws Exception {
+        JSONObject g = resolvePlace(place);
+        if (g == null) return place + " için konumu bulamadım. Yazım hatası olabilir; şehir veya bölge adını biraz daha açık yazar mısın?";
+
         double lat = g.getDouble("latitude"), lon = g.getDouble("longitude");
         String name = g.optString("name", place);
         String admin = g.optString("admin1", "");
@@ -165,8 +217,12 @@ public class LocalCommandRouter {
 
         String forecast = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon +
                 "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m" +
-                "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=1";
+                "&hourly=temperature_2m,apparent_temperature,weather_code,precipitation_probability,wind_speed_10m" +
+                "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=3";
         JSONObject w = getJson(forecast);
+
+        if (hoursAhead > 0) return hourlyWeather(label, w, hoursAhead);
+
         JSONObject cur = w.getJSONObject("current");
         JSONObject daily = w.getJSONObject("daily");
         double temp = cur.optDouble("temperature_2m", Double.NaN);
@@ -187,6 +243,119 @@ public class LocalCommandRouter {
         out.append(".");
         if (!Double.isNaN(min) && !Double.isNaN(max)) out.append(" Bugün yaklaşık ").append(Math.round(min)).append("–").append(Math.round(max)).append("°C.");
         if (rain >= 0) out.append(" En yüksek yağış olasılığı %").append(rain).append(".");
+        if (!Double.isNaN(wind)) out.append(" Rüzgar ").append(Math.round(wind)).append(" km/sa.");
+        return out.toString();
+    }
+
+    private JSONObject resolvePlace(String place) throws Exception {
+        ArrayList<String> candidates = new ArrayList<>();
+        addCandidate(candidates, place);
+        String folded = fold(place).replaceAll("\\s+", " ").trim();
+        addCandidate(candidates, folded);
+
+        if (folded.contains("mallorca")) {
+            if (folded.contains("pal") || folded.contains("palm") || folded.contains("palo") || folded.contains("pama")) addCandidate(candidates, "Palma de Mallorca");
+            addCandidate(candidates, "Mallorca");
+        }
+
+        String[] parts = folded.split(" ");
+        if (parts.length >= 2) {
+            addCandidate(candidates, parts[parts.length - 1]);
+            addCandidate(candidates, parts[parts.length - 2] + " " + parts[parts.length - 1]);
+        }
+
+        for (String q : candidates) {
+            String geocode = "https://geocoding-api.open-meteo.com/v1/search?name=" + URLEncoder.encode(q, "UTF-8") + "&count=5&language=tr&format=json";
+            JSONObject geo = getJson(geocode);
+            JSONArray results = geo.optJSONArray("results");
+            if (results != null && results.length() > 0) {
+                JSONObject best = chooseBestResult(place, results);
+                if (best != null) return best;
+            }
+        }
+        return null;
+    }
+
+    private void addCandidate(ArrayList<String> list, String q) {
+        if (q == null) return;
+        String x = q.trim();
+        if (x.length() < 2) return;
+        for (String old : list) if (fold(old).equals(fold(x))) return;
+        list.add(x);
+    }
+
+    private JSONObject chooseBestResult(String original, JSONArray results) {
+        String target = fold(original);
+        JSONObject best = null;
+        int bestScore = Integer.MIN_VALUE;
+        for (int i = 0; i < results.length(); i++) {
+            JSONObject r = results.optJSONObject(i);
+            if (r == null) continue;
+            String name = fold(r.optString("name", ""));
+            String admin = fold(r.optString("admin1", ""));
+            String country = fold(r.optString("country", ""));
+            int score = 0;
+            for (String token : target.split(" ")) {
+                if (token.length() < 3) continue;
+                if (name.contains(token)) score += 5;
+                else if (admin.contains(token)) score += 3;
+                else if (country.contains(token)) score += 1;
+                else if (levenshtein(token, name) <= 2) score += 2;
+            }
+            int population = r.optInt("population", 0);
+            if (population > 100000) score += 1;
+            if (score > bestScore) { bestScore = score; best = r; }
+        }
+        return best;
+    }
+
+    private int levenshtein(String a, String b) {
+        if (a == null || b == null) return 99;
+        if (a.length() > 20 || b.length() > 30) return 99;
+        int[] prev = new int[b.length() + 1], cur = new int[b.length() + 1];
+        for (int j = 0; j <= b.length(); j++) prev[j] = j;
+        for (int i = 1; i <= a.length(); i++) {
+            cur[0] = i;
+            for (int j = 1; j <= b.length(); j++) {
+                int cost = a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1;
+                cur[j] = Math.min(Math.min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+            }
+            int[] t = prev; prev = cur; cur = t;
+        }
+        return prev[b.length()];
+    }
+
+    private String hourlyWeather(String label, JSONObject w, int hoursAhead) throws Exception {
+        JSONObject hourly = w.getJSONObject("hourly");
+        JSONArray times = hourly.getJSONArray("time");
+        JSONArray temps = hourly.getJSONArray("temperature_2m");
+        JSONArray feels = hourly.optJSONArray("apparent_temperature");
+        JSONArray codes = hourly.getJSONArray("weather_code");
+        JSONArray rains = hourly.optJSONArray("precipitation_probability");
+        JSONArray winds = hourly.optJSONArray("wind_speed_10m");
+
+        String currentIso = w.getJSONObject("current").optString("time", "");
+        int base = 0;
+        for (int i = 0; i < times.length(); i++) {
+            if (times.optString(i).compareTo(currentIso) >= 0) { base = i; break; }
+        }
+        int idx = Math.min(times.length() - 1, base + hoursAhead);
+        String time = times.optString(idx, "");
+        String hm = time.length() >= 16 ? time.substring(11, 16) : time;
+        double temp = temps.optDouble(idx, Double.NaN);
+        double feel = feels == null ? Double.NaN : feels.optDouble(idx, Double.NaN);
+        int code = codes.optInt(idx, -1);
+        int rain = rains == null ? -1 : rains.optInt(idx, -1);
+        double wind = winds == null ? Double.NaN : winds.optDouble(idx, Double.NaN);
+
+        StringBuilder out = new StringBuilder();
+        out.append(label).append(" için ").append(hoursAhead).append(" saat sonra");
+        if (!hm.isEmpty()) out.append(" (").append(hm).append(" civarı)");
+        out.append(" ").append(weatherText(code));
+        if (!Double.isNaN(temp)) out.append(", yaklaşık ").append(Math.round(temp)).append("°C");
+        if (!Double.isNaN(feel)) out.append(" (hissedilen ").append(Math.round(feel)).append("°C)");
+        out.append(".");
+        if (rain >= 0) out.append(" Yağış olasılığı %").append(rain).append(".");
         if (!Double.isNaN(wind)) out.append(" Rüzgar ").append(Math.round(wind)).append(" km/sa.");
         return out.toString();
     }

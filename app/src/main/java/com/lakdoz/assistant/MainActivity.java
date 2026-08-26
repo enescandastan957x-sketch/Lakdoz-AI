@@ -66,7 +66,7 @@ public class MainActivity extends Activity {
         root.addView(top);
 
         TextView sub = new TextView(this);
-        sub.setText("0.7 • Gemini Flash • Galaxy S25 Ultra"); sub.setTextSize(14); sub.setTextColor(Color.rgb(156,163,175));
+        sub.setText("0.8 • Gemini Auto-Fallback • Galaxy S25 Ultra"); sub.setTextSize(14); sub.setTextColor(Color.rgb(156,163,175));
         sub.setPadding(0,dp(2),0,dp(8)); root.addView(sub);
 
         status = new TextView(this); status.setText("Hazır"); status.setTextSize(14); status.setTextColor(Color.rgb(129,230,217));
@@ -106,7 +106,7 @@ public class MainActivity extends Activity {
     private void showSettings() {
         LinearLayout box = new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL); box.setPadding(dp(14),dp(14),dp(14),dp(14));
         TextView note = new TextView(this);
-        note.setText("Gemini anahtarın bu cihazda Android Keystore ile şifrelenir. Model otomatik seçilir; 404 olursa Lakdoz güncel Flash modellerini sırayla dener.");
+        note.setText("Gemini anahtarın bu cihazda Android Keystore ile şifrelenir. Lakdoz önce ücretsiz katmana uygun Flash modellerini dener; yoğunluk veya geçici hata olursa otomatik yeniden dener ve yedek modele geçer.");
         note.setTextSize(14); box.addView(note);
         EditText key = new EditText(this);
         key.setHint(settings.getGeminiApiKey().isEmpty() ? "Gemini API anahtarı" : "Anahtar kayıtlı • değiştirmek için yenisini gir");
@@ -116,17 +116,17 @@ public class MainActivity extends Activity {
                 .setPositiveButton("Kaydet",null).setNeutralButton("Bağlantıyı test et",null).setNegativeButton("İptal",null).create();
         dialog.setOnShowListener(x -> {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-                try { String k = key.getText().toString().trim(); if (!k.isEmpty()) settings.setGeminiApiKey(k); settings.setGeminiModel("gemini-flash-latest"); status.setText("Gemini ayarları kaydedildi."); dialog.dismiss(); }
+                try { String k = key.getText().toString().trim(); if (!k.isEmpty()) settings.setGeminiApiKey(k); settings.setGeminiModel("gemini-2.5-flash"); status.setText("Gemini ayarları kaydedildi."); dialog.dismiss(); }
                 catch (Exception e) { Toast.makeText(this,"Kaydedilemedi: "+e.getMessage(),Toast.LENGTH_LONG).show(); }
             });
             dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
-                try { String k = key.getText().toString().trim(); if (!k.isEmpty()) settings.setGeminiApiKey(k); settings.setGeminiModel("gemini-flash-latest"); }
+                try { String k = key.getText().toString().trim(); if (!k.isEmpty()) settings.setGeminiApiKey(k); settings.setGeminiModel("gemini-2.5-flash"); }
                 catch (Exception e) { Toast.makeText(this,"Kaydedilemedi: "+e.getMessage(),Toast.LENGTH_LONG).show(); return; }
-                status.setText("Gemini bağlantısı test ediliyor…");
+                status.setText("Gemini test ediliyor • yoğunluk varsa otomatik tekrar denenecek…");
                 executor.execute(() -> {
                     String msg;
                     try { msg = new AiClient(getApplicationContext()).testConnection(); }
-                    catch (Exception e) { msg = "Bağlantı başarısız: " + (e.getMessage()==null ? "bilinmeyen hata" : e.getMessage()); }
+                    catch (Exception e) { msg = friendlyError(e); }
                     final String out = msg;
                     runOnUiThread(() -> { status.setText(out.startsWith("Bağlantı başarısız") ? out : "Gemini bağlantısı başarılı ✓"); Toast.makeText(this,out,Toast.LENGTH_LONG).show(); });
                 });
@@ -138,14 +138,23 @@ public class MainActivity extends Activity {
     private void submit(String text) {
         final String q = text == null ? "" : text.trim(); if (q.isEmpty()) return;
         if (settings.getGeminiApiKey().isEmpty()) { Toast.makeText(this,"Önce AI AYARLARI bölümünden Gemini anahtarını ekle.",Toast.LENGTH_LONG).show(); showSettings(); return; }
-        input.setText(""); List<HistoryStore.Turn> before = history.load(); history.add("user",q); refreshHistory(); status.setText("Lakdoz düşünüyor…");
+        input.setText(""); List<HistoryStore.Turn> before = history.load(); history.add("user",q); refreshHistory(); status.setText("Lakdoz düşünüyor • gerekirse yedek modele geçecek…");
         executor.execute(() -> {
             String answer;
             try { LocalCommandRouter.Result local = new LocalCommandRouter(getApplicationContext()).tryHandle(q); answer = local.handled ? local.response : new AiClient(getApplicationContext()).ask(q,before); }
-            catch (Exception e) { answer = "Bağlantı/işlem hatası: " + (e.getMessage()==null ? "bilinmeyen hata" : e.getMessage()); }
+            catch (Exception e) { answer = friendlyError(e); }
             final String out = answer; history.add("assistant",out);
             runOnUiThread(() -> { status.setText("Hazır"); refreshHistory(); speak(out); });
         });
+    }
+
+    private String friendlyError(Exception e) {
+        String m = e.getMessage() == null ? "" : e.getMessage();
+        if (m.contains("HTTP 503")) return "Bağlantı başarısız: Gemini şu anda çok yoğun. Lakdoz birkaç kez ve farklı modellerle denedi; biraz sonra tekrar dene.";
+        if (m.contains("HTTP 429")) return "Bağlantı başarısız: Gemini ücretsiz kullanım sınırına ulaşıldı. Bir süre sonra tekrar dene.";
+        if (m.contains("HTTP 401") || m.contains("HTTP 403") || m.contains("reddedildi")) return "Bağlantı başarısız: Gemini API anahtarı kabul edilmedi. AI AYARLARI bölümündeki anahtarı kontrol et.";
+        if (m.contains("HTTP 404")) return "Bağlantı başarısız: Kullanılabilir bir Gemini modeli bulunamadı. Lakdoz otomatik model seçimini denedi.";
+        return "Bağlantı başarısız: " + (m.isEmpty() ? "Gemini servisine ulaşılamadı." : m);
     }
 
     private void refreshHistory() {

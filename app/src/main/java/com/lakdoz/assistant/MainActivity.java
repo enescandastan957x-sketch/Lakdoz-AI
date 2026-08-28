@@ -4,6 +4,9 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.net.Uri;
+import android.database.Cursor;
+import android.provider.OpenableColumns;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -43,7 +46,7 @@ import java.util.concurrent.Executors;
 public class MainActivity extends Activity {
     private HistoryStore history;
     private SecureSettings settings;
-    private TextView status,currentTitle,listenCaption,listenPartial,listenTitle;
+    private TextView status,currentTitle,listenCaption,listenPartial,listenTitle,attachmentInfo;
     private EditText input,searchInput;
     private ScrollView messageScroll,listenScroll;
     private LinearLayout messageList,conversationList,drawer;
@@ -52,6 +55,9 @@ public class MainActivity extends Activity {
     private Button soundToggle,repeatListen;
     private SpeechRecognizer recognizer;
     private TextToSpeech systemTts;
+    private Uri pendingMediaUri;
+    private String pendingMediaMime="",pendingMediaName="";
+    private static final int REQ_MEDIA=44;
     private final ExecutorService executor=Executors.newSingleThreadExecutor();
     private final ExecutorService voiceExecutor=Executors.newSingleThreadExecutor();
     private final Object speechLock=new Object();
@@ -91,11 +97,12 @@ public class MainActivity extends Activity {
         LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
         Button menu=iconButton("☰");menu.setOnClickListener(v->openDrawer());header.addView(menu,new LinearLayout.LayoutParams(dp(48),dp(46)));
         ImageView avatar=mascot();LinearLayout.LayoutParams alp=new LinearLayout.LayoutParams(dp(46),dp(46));alp.setMargins(dp(9),0,dp(9),0);header.addView(avatar,alp);
-        LinearLayout titles=new LinearLayout(this);titles.setOrientation(LinearLayout.VERTICAL);currentTitle=new TextView(this);currentTitle.setText("Yeni sohbet");currentTitle.setTextColor(Color.WHITE);currentTitle.setTextSize(21);currentTitle.setTypeface(Typeface.DEFAULT_BOLD);currentTitle.setSingleLine(true);currentTitle.setEllipsize(TextUtils.TruncateAt.END);titles.addView(currentTitle);TextView version=new TextView(this);version.setText("Lakdoz AI • Smart Core • Canlı Kaynaklar");version.setTextColor(MUTED);version.setTextSize(11);titles.addView(version);header.addView(titles,new LinearLayout.LayoutParams(0,-2,1));Button settingsBtn=iconButton("⚙");settingsBtn.setOnClickListener(v->showSettings());header.addView(settingsBtn,new LinearLayout.LayoutParams(dp(48),dp(46)));main.addView(header);
-        status=new TextView(this);status.setText("● Hazır • Smart Core aktif");status.setTextColor(CYAN);status.setTextSize(12);status.setPadding(dp(112),0,0,dp(7));main.addView(status);
+        LinearLayout titles=new LinearLayout(this);titles.setOrientation(LinearLayout.VERTICAL);currentTitle=new TextView(this);currentTitle.setText("Yeni sohbet");currentTitle.setTextColor(Color.WHITE);currentTitle.setTextSize(21);currentTitle.setTypeface(Typeface.DEFAULT_BOLD);currentTitle.setSingleLine(true);currentTitle.setEllipsize(TextUtils.TruncateAt.END);titles.addView(currentTitle);TextView version=new TextView(this);version.setText("Lakdoz AI • Derin Zeka • Fotoğraf & Video");version.setTextColor(MUTED);version.setTextSize(11);titles.addView(version);header.addView(titles,new LinearLayout.LayoutParams(0,-2,1));Button settingsBtn=iconButton("⚙");settingsBtn.setOnClickListener(v->showSettings());header.addView(settingsBtn,new LinearLayout.LayoutParams(dp(48),dp(46)));main.addView(header);
+        status=new TextView(this);status.setText("● Hazır • Derin düşünme aktif");status.setTextColor(CYAN);status.setTextSize(12);status.setPadding(dp(112),0,0,dp(7));main.addView(status);
         messageScroll=new ScrollView(this);messageScroll.setFillViewport(true);messageScroll.setVerticalScrollBarEnabled(false);messageList=new LinearLayout(this);messageList.setOrientation(LinearLayout.VERTICAL);messageList.setPadding(0,dp(6),0,dp(14));messageScroll.addView(messageList);main.addView(messageScroll,new LinearLayout.LayoutParams(-1,0,1));
         LinearLayout composer=new LinearLayout(this);composer.setOrientation(LinearLayout.VERTICAL);composer.setPadding(dp(8),dp(8),dp(8),dp(8));composer.setBackground(rounded(Color.rgb(12,20,34),22));input=new EditText(this);input.setHint("Lakdoz'a mesaj yaz…");input.setHintTextColor(Color.rgb(108,121,143));input.setTextColor(TEXT);input.setTextSize(16);input.setMinLines(2);input.setMaxLines(5);input.setPadding(dp(13),dp(10),dp(13),dp(10));input.setBackground(rounded(CARD,17));input.setOnFocusChangeListener((v,hasFocus)->{if(hasFocus){v.postDelayed(()->{View content=findViewById(android.R.id.content);if(content!=null)content.requestApplyInsets();},80);}});composer.addView(input);
-        LinearLayout actions=new LinearLayout(this);actions.setPadding(0,dp(8),0,0);Button talk=actionButton("🎙 Konuş",Color.rgb(30,45,69));Button send=actionButton("Gönder ➜",Color.rgb(70,91,205));talk.setOnClickListener(v->listen());send.setOnClickListener(v->submit(input.getText().toString(),false));LinearLayout.LayoutParams p1=new LinearLayout.LayoutParams(0,dp(50),1);p1.setMargins(dp(3),0,dp(3),0);actions.addView(talk,p1);LinearLayout.LayoutParams p2=new LinearLayout.LayoutParams(0,dp(50),1);p2.setMargins(dp(3),0,dp(3),0);actions.addView(send,p2);composer.addView(actions);main.addView(composer);
+        attachmentInfo=new TextView(this);attachmentInfo.setTextColor(CYAN);attachmentInfo.setTextSize(12);attachmentInfo.setPadding(dp(8),dp(6),dp(8),0);attachmentInfo.setVisibility(View.GONE);composer.addView(attachmentInfo);
+        LinearLayout actions=new LinearLayout(this);actions.setPadding(0,dp(8),0,0);Button attach=actionButton("📎 Ekle",Color.rgb(38,52,78));Button talk=actionButton("🎙 Konuş",Color.rgb(30,45,69));Button send=actionButton("Gönder ➜",Color.rgb(70,91,205));attach.setOnClickListener(v->pickMedia());talk.setOnClickListener(v->listen());send.setOnClickListener(v->submit(input.getText().toString(),false));LinearLayout.LayoutParams pa=new LinearLayout.LayoutParams(0,dp(50),0.75f);pa.setMargins(dp(3),0,dp(3),0);actions.addView(attach,pa);LinearLayout.LayoutParams p1=new LinearLayout.LayoutParams(0,dp(50),1);p1.setMargins(dp(3),0,dp(3),0);actions.addView(talk,p1);LinearLayout.LayoutParams p2=new LinearLayout.LayoutParams(0,dp(50),1);p2.setMargins(dp(3),0,dp(3),0);actions.addView(send,p2);composer.addView(actions);main.addView(composer);
         scrim=new View(this);scrim.setBackgroundColor(Color.argb(165,0,0,0));scrim.setVisibility(View.GONE);scrim.setOnClickListener(v->closeDrawer());root.addView(scrim,new FrameLayout.LayoutParams(-1,-1));
         drawer=buildDrawer();drawer.setVisibility(View.GONE);int drawerWidth=Math.min(dp(330),(int)(getResources().getDisplayMetrics().widthPixels*0.88f));root.addView(drawer,new FrameLayout.LayoutParams(drawerWidth,-1,Gravity.START));
         listeningOverlay=buildListeningOverlay();listeningOverlay.setVisibility(View.GONE);root.addView(listeningOverlay,new FrameLayout.LayoutParams(-1,-1));return root;
@@ -136,20 +143,66 @@ public class MainActivity extends Activity {
     private TextView addBubble(String role,String text){boolean user="user".equals(role);LinearLayout row=new LinearLayout(this);row.setGravity(user?Gravity.END:Gravity.START);row.setPadding(0,dp(5),0,dp(5));if(!user){ImageView cat=mascot();LinearLayout.LayoutParams av=new LinearLayout.LayoutParams(dp(40),dp(40));av.setMargins(0,dp(4),dp(7),0);row.addView(cat,av);}LinearLayout bubble=new LinearLayout(this);bubble.setOrientation(LinearLayout.VERTICAL);bubble.setPadding(dp(14),dp(10),dp(14),dp(11));bubble.setBackground(rounded(user?USER:CARD,18));TextView who=new TextView(this);who.setText(user?"SEN":"LAKDOZ");who.setTextSize(11);who.setTypeface(Typeface.DEFAULT_BOLD);who.setTextColor(user?Color.rgb(190,215,255):CYAN);bubble.addView(who);TextView body=new TextView(this);body.setText(text);body.setTextColor(TEXT);body.setTextSize(17);body.setLineSpacing(0,1.12f);body.setPadding(0,dp(4),0,0);bubble.addView(body);int max=(int)(getResources().getDisplayMetrics().widthPixels*(user?0.82f:0.76f));row.addView(bubble,new LinearLayout.LayoutParams(max,-2));messageList.addView(row,new LinearLayout.LayoutParams(-1,-2));return body;}
 
     private void submit(String text,boolean fromVoice){
-        final String q=text==null?"":text.trim();if(q.isEmpty())return;if(settings.getGeminiApiKey().isEmpty()){Toast.makeText(this,"Önce Ayarlar'dan AI bağlantı anahtarını ekle.",Toast.LENGTH_LONG).show();showSettings();return;}
-        if(!fromVoice)input.setText("");List<HistoryStore.Turn> before=history.load();String memory=history.buildRelevantMemory(q,7000);history.add("user",q);if(!fromVoice)refreshHistory();final TextView streaming=fromVoice?null:addBubble("assistant","");if(!fromVoice)scrollBottom();status.setText(memory.isEmpty()?"● Lakdoz yazıyor…":"● Hafızadan bağlam bulundu • Lakdoz yazıyor…");synchronized(speechLock){speechBuffer.setLength(0);}if(fromVoice){listenTitle.setText("Lakdoz düşünüyor…");listenPartial.setText(q);listenCaption.setText(memory.isEmpty()?"Cevap hazırlanıyor…":"Eski sohbetlerden ilgili bağlam bulundu");}
-        executor.execute(()->{try{String understood=smartInterpret(q,before,memory);LocalCommandRouter.Result local=new LocalCommandRouter(getApplicationContext()).tryHandle(understood,before);String answer;if(local.handled){answer=local.response;if(fromVoice)runOnUiThread(()->{listenTitle.setText("Lakdoz");listenPartial.setText(local.response);listenCaption.setText(settings.isContinuousVoice()?"Cevabım bitince seni tekrar dinleyeceğim":"Hazırım");});else runOnUiThread(()->streaming.setText(local.response));queueVoiceChunk(local.response);if(fromVoice&&settings.isContinuousVoice())queueAutoRelisten();}else{final StringBuilder voiceScreen=new StringBuilder();answer=new SmartAiOrchestrator(getApplicationContext()).ask(understood,before,memory,delta->{if(fromVoice){voiceScreen.append(delta);runOnUiThread(()->{listenTitle.setText("Lakdoz konuşuyor…");listenPartial.setText(voiceScreen.toString());listenCaption.setText("Cevap geliyor…");if(listenScroll!=null)listenScroll.post(()->listenScroll.fullScroll(View.FOCUS_DOWN));});}else runOnUiThread(()->{streaming.append(delta);scrollBottom();});consumeSpeechDelta(delta,false);});consumeSpeechDelta("",true);}history.add("assistant",answer);final String out=answer;runOnUiThread(()->{status.setText("● Hazır • Smart Core aktif");if(fromVoice){listenTitle.setText("Lakdoz");listenPartial.setText(out);listenCaption.setText(settings.isContinuousVoice()?"Cevabım bitince seni tekrar dinleyeceğim":"Hazırım • tekrar konuşabilirsin");if(listenScroll!=null)listenScroll.post(()->listenScroll.fullScroll(View.FOCUS_DOWN));if(settings.isContinuousVoice())queueAutoRelisten();}else refreshHistory();});}catch(Exception e){final String err=friendlyError(e);history.add("assistant",err);runOnUiThread(()->{status.setText("● Hazır");if(fromVoice){listenTitle.setText("Bir sorun oldu");listenPartial.setText(err);listenCaption.setText("Tekrar deneyebilirsin");}else refreshHistory();});}});
-    }
+        final String typed=text==null?"":text.trim();
+        final Uri mediaUri=fromVoice?null:pendingMediaUri;
+        final String mediaMime=fromVoice?"":pendingMediaMime;
+        final String mediaName=fromVoice?"":pendingMediaName;
+        if(typed.isEmpty()&&mediaUri==null)return;
+        if(settings.getGeminiApiKey().isEmpty()){Toast.makeText(this,"Önce Ayarlar'dan AI bağlantı anahtarını ekle.",Toast.LENGTH_LONG).show();showSettings();return;}
 
-    private String smartInterpret(String raw,List<HistoryStore.Turn> before,String memory){
-        try{
-            String instruction="Rewrite the user's intended message in natural Turkish with MINIMAL changes. Correct likely typos, missing letters and casual shorthand. If it is clearly a follow-up, preserve the recent topic, person, place, product and time. Never invent a new city, person, product, event or fact. For very short or ambiguous input, do not expand it into a new meaning; keep it close to the original. Return only the rewritten user message, not an answer or explanation. Input: "+raw;
-            String out=new AiClient(getApplicationContext()).askStreaming(instruction,before,memory,null);
-            if(out==null)return raw;
-            out=out.trim();
-            if(out.isEmpty()||out.length()>Math.max(240,raw.length()*4))return raw;
-            return out;
-        }catch(Exception e){return raw;}
+        final String q=typed.isEmpty()?(mediaMime.startsWith("video/")?"Bu videoyu dikkatlice analiz et.":"Bu fotoğrafı dikkatlice analiz et."):typed;
+        final String shown=mediaUri==null?q:q+"\n📎 "+(mediaName.isEmpty()?"Medya":mediaName);
+        if(!fromVoice){input.setText("");clearPendingMedia();}
+        List<HistoryStore.Turn> before=history.load();
+        String memory=history.buildRelevantMemory(q,9000);
+        history.add("user",shown);
+        if(!fromVoice)refreshHistory();
+        final TextView streaming=fromVoice?null:addBubble("assistant","");
+        if(!fromVoice)scrollBottom();
+        status.setText(mediaUri!=null?"● Fotoğraf/video inceleniyor…":(memory.isEmpty()?"● Lakdoz düşünüyor…":"● Hafıza + bağlam inceleniyor…"));
+        synchronized(speechLock){speechBuffer.setLength(0);}
+        if(fromVoice){listenTitle.setText("Lakdoz düşünüyor…");listenPartial.setText(q);listenCaption.setText("Cevap hazırlanıyor…");}
+
+        executor.execute(()->{
+            try{
+                String answer;
+                if(mediaUri==null){
+                    LocalCommandRouter.Result local=new LocalCommandRouter(getApplicationContext()).tryHandle(q,before);
+                    if(local.handled){
+                        answer=local.response;
+                        final String localOut=answer;
+                        runOnUiThread(()->{if(fromVoice){listenTitle.setText("Lakdoz");listenPartial.setText(localOut);listenCaption.setText("Hazırım");}else streaming.setText(localOut);});
+                        queueVoiceChunk(answer);
+                    }else{
+                        final StringBuilder voiceScreen=new StringBuilder();
+                        answer=new SmartAiOrchestrator(getApplicationContext()).ask(q,before,memory,delta->{
+                            if(fromVoice){voiceScreen.append(delta);runOnUiThread(()->{listenTitle.setText("Lakdoz konuşuyor…");listenPartial.setText(voiceScreen.toString());if(listenScroll!=null)listenScroll.post(()->listenScroll.fullScroll(View.FOCUS_DOWN));});}
+                            else runOnUiThread(()->{streaming.append(delta);scrollBottom();});
+                            consumeSpeechDelta(delta,false);
+                        });
+                        consumeSpeechDelta("",true);
+                    }
+                }else{
+                    answer=new AiClient(getApplicationContext()).askStreamingMedia(getApplicationContext(),q,before,memory,mediaUri,mediaMime,delta->{
+                        if(!fromVoice)runOnUiThread(()->{streaming.append(delta);scrollBottom();});
+                    });
+                    queueVoiceChunk(answer);
+                }
+                history.add("assistant",answer);
+                final String out=answer;
+                runOnUiThread(()->{
+                    status.setText("● Hazır • Derin düşünme aktif");
+                    if(fromVoice){
+                        listenTitle.setText("Lakdoz");listenPartial.setText(out);
+                        listenCaption.setText(settings.isContinuousVoice()?"Cevabım bitince seni tekrar dinleyeceğim":"Hazırım");
+                        if(settings.isContinuousVoice())queueAutoRelisten();
+                    }else refreshHistory();
+                });
+            }catch(Exception e){
+                final String err=friendlyError(e);history.add("assistant",err);
+                runOnUiThread(()->{status.setText("● Hazır");if(fromVoice){listenTitle.setText("Bir sorun oldu");listenPartial.setText(err);}else refreshHistory();});
+            }
+        });
     }
 
     private void consumeSpeechDelta(String delta,boolean flush){String ready=null;synchronized(speechLock){speechBuffer.append(delta);int cut=findSpeechCut(speechBuffer);if(flush&&speechBuffer.length()>0)cut=speechBuffer.length();if(cut>0){ready=speechBuffer.substring(0,cut).trim();speechBuffer.delete(0,cut);}}if(ready!=null&&!ready.isEmpty())queueVoiceChunk(ready);}
@@ -174,6 +227,33 @@ public class MainActivity extends Activity {
     private void ensureMic(){if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},10);}
     private void listen(){if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){ensureMic();return;}showListening();startRecognizerOnly();}
     private void startRecognizerOnly(){if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){ensureMic();return;}if(listeningOverlay.getVisibility()!=View.VISIBLE)showListening();listenTitle.setText("Dinliyorum…");listenPartial.setText("Seni dinliyorum…");listenCaption.setText("Canlı dinleme aktif");if(recognizer!=null)recognizer.destroy();recognizer=SpeechRecognizer.createSpeechRecognizer(this);recognizer.setRecognitionListener(new RecognitionListener(){public void onReadyForSpeech(Bundle p){status.setText("● Dinliyorum…");}public void onBeginningOfSpeech(){listenCaption.setText("Seni duyuyorum…");}public void onRmsChanged(float v){float s=1f+Math.max(0f,Math.min(0.18f,(v+2f)/55f));if(pulseRing!=null){pulseRing.setScaleX(s);pulseRing.setScaleY(s);}}public void onBufferReceived(byte[] b){}public void onEndOfSpeech(){listenCaption.setText("Anlıyorum…");status.setText("● Anlıyorum…");}public void onError(int e){listenTitle.setText("Tekrar deneyelim");listenCaption.setText("Mikrofon seni anlayamadı");status.setText("● Ses algılama hatası");}public void onResults(Bundle b){ArrayList<String> xs=b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);if(xs!=null&&!xs.isEmpty()){String q=xs.get(0);listenPartial.setText(q);listenTitle.setText("Lakdoz düşünüyor…");listenCaption.setText("Cevap hazırlanıyor…");submit(q,true);}}public void onPartialResults(Bundle b){ArrayList<String> xs=b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);if(xs!=null&&!xs.isEmpty())listenPartial.setText(xs.get(0));}public void onEvent(int t,Bundle b){}});Intent i=new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);i.putExtra(RecognizerIntent.EXTRA_LANGUAGE,"tr-TR");i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS,true);recognizer.startListening(i);}
+
+    private void pickMedia(){
+        Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        i.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"image/*","video/*"});
+        startActivityForResult(i,REQ_MEDIA);
+    }
+
+    private void clearPendingMedia(){
+        pendingMediaUri=null;pendingMediaMime="";pendingMediaName="";
+        if(attachmentInfo!=null){attachmentInfo.setText("");attachmentInfo.setVisibility(View.GONE);}
+    }
+
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
+        super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode!=REQ_MEDIA||resultCode!=RESULT_OK||data==null||data.getData()==null)return;
+        Uri uri=data.getData();
+        try{getContentResolver().takePersistableUriPermission(uri,data.getFlags()&Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(Exception ignored){}
+        String mime=getContentResolver().getType(uri);
+        if(mime==null||(!(mime.startsWith("image/"))&&!(mime.startsWith("video/")))){Toast.makeText(this,"Sadece fotoğraf veya video seçebilirsin.",Toast.LENGTH_LONG).show();return;}
+        String name="Medya";
+        try(Cursor cur=getContentResolver().query(uri,null,null,null,null)){if(cur!=null&&cur.moveToFirst()){int ix=cur.getColumnIndex(OpenableColumns.DISPLAY_NAME);if(ix>=0)name=cur.getString(ix);}}catch(Exception ignored){}
+        pendingMediaUri=uri;pendingMediaMime=mime;pendingMediaName=name==null?"Medya":name;
+        attachmentInfo.setText((mime.startsWith("video/")?"🎬 ":"🖼️ ")+pendingMediaName+"  • göndermeye hazır");
+        attachmentInfo.setVisibility(View.VISIBLE);
+    }
 
     private Button iconButton(String text){Button b=new Button(this);b.setText(text);b.setTextSize(20);b.setTextColor(TEXT);b.setPadding(0,0,0,0);b.setBackground(rounded(Color.rgb(24,34,52),14));return b;}
     private Button actionButton(String text,int color){Button b=new Button(this);b.setText(text);b.setTextColor(Color.WHITE);b.setTextSize(15);b.setAllCaps(false);b.setBackground(rounded(color,16));return b;}
